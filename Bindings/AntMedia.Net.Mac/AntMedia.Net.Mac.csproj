@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>1.0.0.8</Version>
+    <authors>s.bokatuk</authors>
+    <owners>s.bokatuk</owners>
+    <title>Xamarin bindings to the native AntMedia WebRTC Mac SDK.</title>
+    <projectUrl>https://github.com/sbokatuk/AntMedia.Net</projectUrl>
+    <description>MAUI .Net Mac Xamarin bindings for AntMedia WebRTC SDK. Alows to use The AntMedia WebRTC SDK in your app.</description>
+    <summary>.Net Xamarin AntMedia WebRTC Mac SDK, see https://antmedia.io/</summary>
+    <tags>Xamarin AntMedia .Net WebRTC Mac SDK Xamarin Xamarin.Mac MAUI MAUI.Mac .Net Binding</tags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageId>AntMedia.Net.Mac</PackageId>
+    <AssemblyName>AntMedia.Net.Mac</AssemblyName>
+    <SynchReleaseVersion>false</SynchReleaseVersion>
+    <ReleaseVersion>4.2.6.1</ReleaseVersion>
+    <TargetFramework>net8.0-maccatalyst</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>true</ImplicitUsings>
+    <IsBindingProject>true</IsBindingProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
+    <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="AntMedia.Net.Mac.targets">
+      <PackagePath>build/AntMedia.Net.Mac.targets</PackagePath>
+    </Content>
+  </ItemGroup>
+</Project>
