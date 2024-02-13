@@ -31,8 +31,8 @@ fi
 
 if [[ "$1" == "native" ]]
 then
-# rm -rf Native/src
-# mkdir -p Native/src
+rm -rf Native/src
+mkdir -p Native/src
 rm -rf Bindings/AntMedia.Net.Android/lib
 mkdir -p Bindings/AntMedia.Net.Android/lib
 rm -rf Bindings/AntMedia.Net.iOS/lib

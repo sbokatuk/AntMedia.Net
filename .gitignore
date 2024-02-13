@@ -397,3 +397,5 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 Bindings/AntMedia.Net.Android/lib
+Bindings/AntMedia.Net.iOS/lib
+Bindings/AntMedia.Net.WebRTC.Dependency.iOS/lib
