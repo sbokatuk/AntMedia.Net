@@ -38,4 +38,18 @@ sed -E -i "" "s=smth=$smth=" NugetPackages/$NMSC.nuspec
 ./Scripts/create.sh GITHUB="$GITHUB" NMSC="$NMSC" VENDOR="$VENDOR" DDD="$DDD" SITE="$SITE" smth="$smth" PLATFORM="Mac"
 ./Scripts/create.sh GITHUB="$GITHUB" NMSC="$NMSC" VENDOR="$VENDOR" DDD="$DDD" SITE="$SITE" smth="$smth" PLATFORM="iOS"
 ./Scripts/create.sh GITHUB="$GITHUB" NMSC="$NMSC" VENDOR="$VENDOR" DDD="$DDD" SITE="$SITE" smth="$smth" PLATFORM="Android"
-./Scripts/build.smth.sh VERSION="$VERSION" IOSVERSION="$IOSVERSION" ANDROIDVERSION="$ANDROIDVERSION" BUILD="1" MACVERSION="$MACVERSION" NMSC="$NMSC" VENDOR="$VENDOR" smth="$smth"
+cp -R Scripts/build.smth.sh Scripts/build.$smth.sh
+sed -E -i "" "s=NMSC=$NMSC=" Scripts/build.$smth.sh
+sed -E -i "" "s=smth=$smth=" Scripts/build.$smth.sh
+sed -E -i "" "s=NMSC=$NMSC=" Scripts/build.$smth.sh
+sed -E -i "" "s=smth=$smth=" Scripts/build.$smth.sh
+sed -E -i "" "s=NMSC=$NMSC=" Scripts/build.$smth.sh
+sed -E -i "" "s=smth=$smth=" Scripts/build.$smth.sh
+
+./Scripts/build.version.sh VERSION="$VERSION" IOSVERSION="$IOSVERSION" ANDROIDVERSION="$ANDROIDVERSION" BUILD="1-beta1" MACVERSION="$MACVERSION" NMSC="$NMSC" VENDOR="$VENDOR" smth="$smth"
+sed -E -i "" "s=1-beta1=$BUILD=" NugetPackages/$NMSC.nuspec
+sed -E -i "" "s=1-beta1=$BUILD=" NugetPackages/$NMSC.Mac.nuspec
+sed -E -i "" "s=1-beta1=$BUILD=" NugetPackages/$NMSC.Android.nuspec
+sed -E -i "" "s=1-beta1=$BUILD=" NugetPackages/$NMSC.iOS.nuspec
+./Scripts/publish.sh $KEY
+
