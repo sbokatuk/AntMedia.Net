@@ -6,6 +6,9 @@
   This sample removes the method: android.support.v4.content.CursorLoader.loadInBackground:
   <remove-node path="/api/package[@name='android.support.v4.content']/class[@name='CursorLoader']/method[@name='loadInBackground']" />
   -->
+  <attr path="/api/package[@name='org.webrtc']/class[@name='StatsReport.Value']" name="managedName">StatsReportValue</attr>
+  <attr path="/api/package[@name='org.webrtc']/class[@name='WrappedNativeVideoEncoder']/method[@name='getScalingSettings' and count(parameter)=0]" name="propertyName"></attr>
+  <attr path="/api/package[@name='org.webrtc']/class[@name='TextureBufferImpl']/method[@name='getType' and count(parameter)=0]" name="propertyName"></attr>
 </metadata>
 
 

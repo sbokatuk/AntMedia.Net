@@ -13,7 +13,7 @@
     <PackageId>AntMedia.Net.Android</PackageId>
     <AssemblyName>AntMedia.Net.Android</AssemblyName>
     <SynchReleaseVersion>false</SynchReleaseVersion>
-    <ReleaseVersion>4.2.6.1</ReleaseVersion>
+    <ReleaseVersion>2.8.0</ReleaseVersion>
     <TargetFramework>net8.0-android</TargetFramework>
     <SupportedOSPlatformVersion>21</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
