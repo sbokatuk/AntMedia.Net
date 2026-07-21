@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    On-device smoke test for the packed AntMedia.Net.iOS package. A plain .NET for iOS app, not a
+    MAUI one, so a failure points at the binding rather than at MAUI startup.
+
+    Driven by .github/scripts/run-ios-device-tests.sh, which builds it for a simulator runtime
+    identifier, installs it with simctl and reads the verdict from the app's stdout.
+  -->
+  <PropertyGroup>
+    <!-- Set by the runner script; the default is the newest band so a bare build is meaningful. -->
+    <AntMediaDeviceTargetFramework Condition=" '$(AntMediaDeviceTargetFramework)' == '' ">net10.0-ios26.0</AntMediaDeviceTargetFramework>
+    <TargetFramework>$(AntMediaDeviceTargetFramework)</TargetFramework>
+
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+
+    <ApplicationId>com.sbokatuk.antmedia.devicetests</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
+
+    <!--
+      The point of this app is to prove the *packaged* binding works, so nothing may be trimmed
+      away on the grounds that the test code does not statically reach it. iOS rejects
+      PublishTrimmed=false outright; MtouchLink=None is how it spells the same intent.
+    -->
+    <MtouchLink>None</MtouchLink>
+
+    <!-- Simulator builds are never signed; the runner installs the .app with simctl. -->
+    <CodesignKey Condition=" $(RuntimeIdentifier.StartsWith('iossimulator')) "></CodesignKey>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The packed .nupkg from artifacts/ (exposed by NuGet.config), never the binding project:
+      the e2e has to run against exactly what would be published.
+    -->
+    <PackageReference Include="AntMedia.Net.iOS" Version="$(AntMediaPackageVersion)" />
+  </ItemGroup>
+
+  <Target Name="ValidateAntMediaPackageVersion" BeforeTargets="Restore;Build"
+          Condition=" '$(AntMediaPackageVersion)' == '' ">
+    <Error Text="AntMediaPackageVersion must be set, e.g. -p:AntMediaPackageVersion=2.17.2-beta.1. Run build/BuildNugets.sh first." />
+  </Target>
+
+</Project>

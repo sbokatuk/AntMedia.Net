@@ -51,6 +51,12 @@ public enum AMSMode: Int {
 }
 
 /// Objective-C projection of `StreamInformation`, which is a Swift class with no @objc surface.
+///
+/// The explicit @objc name is required, not cosmetic: without it Swift exports the class as
+/// `_OBJC_CLASS_$__TtC12WebRTCiOSSDK20AMSStreamInformation`, while the .NET binding links against
+/// `_OBJC_CLASS_$_AMSStreamInformation`, and every consuming app fails at link time with an
+/// undefined symbol.
+@objc(AMSStreamInformation)
 @objcMembers
 public class AMSStreamInformation: NSObject {
     public let streamWidth: Int
@@ -109,6 +115,9 @@ public protocol AMSClientDelegate: AnyObject {
 /// Wraps rather than subclasses: `AntMediaClient` is a Swift class whose members are not @objc,
 /// so inheriting it would expose nothing. Delegate callbacks are received by a private bridge
 /// (`DelegateBridge`) and re-issued on this type's `delegate`.
+///
+/// The explicit @objc name is required — see `AMSStreamInformation` for what breaks without it.
+@objc(AMSClient)
 @objcMembers
 public class AMSClient: NSObject {
     private let client = AntMediaClient()

@@ -57,19 +57,20 @@ case "${SCOPE}" in
         ;;
 esac
 
-PROJECTS=()
+IS_MACOS=false
+[ "$(uname -s)" = "Darwin" ] && IS_MACOS=true
+
+PLATFORM_PROJECTS=()
+PACK_METAPACKAGE=false
 
 if [ "${SCOPE}" = "all" ] || [ "${SCOPE}" = "android" ]; then
-    PROJECTS+=("${ROOT}/src/AntMedia.Net.Android/AntMedia.Net.Android.csproj")
+    PLATFORM_PROJECTS+=("${ROOT}/src/AntMedia.Net.Android/AntMedia.Net.Android.csproj")
 fi
 
 if [ "${SCOPE}" = "all" ] || [ "${SCOPE}" = "apple" ]; then
-    if [ "$(uname -s)" = "Darwin" ]; then
-        PROJECTS+=("${ROOT}/src/AntMedia.Net.iOS/AntMedia.Net.iOS.csproj")
-        # The metapackage carries no assemblies, only per-target-framework dependencies on the
-        # platform packages — but it still targets the iOS TFMs, so restoring it needs the iOS
-        # workload and therefore macOS. It is packed alongside the iOS package for that reason.
-        PROJECTS+=("${ROOT}/src/AntMedia.Net/AntMedia.Net.csproj")
+    if [ "${IS_MACOS}" = true ]; then
+        PLATFORM_PROJECTS+=("${ROOT}/src/AntMedia.Net.iOS/AntMedia.Net.iOS.csproj")
+        PACK_METAPACKAGE=true
     elif [ "${SCOPE}" = "apple" ]; then
         echo "::error::scope 'apple' requires macOS with Xcode" >&2
         exit 1
@@ -78,17 +79,24 @@ if [ "${SCOPE}" = "all" ] || [ "${SCOPE}" = "apple" ]; then
     fi
 fi
 
-PASS1_DIR="${OUTPUT}/.net9-pass"
-PASS2_DIR="${OUTPUT}/.net10-pass"
-rm -rf "${PASS1_DIR}" "${PASS2_DIR}"
+# Scratch directories for the two passes, deliberately *outside* artifacts/: NuGet folder sources
+# search subdirectories, so a pass directory under artifacts/ would let the metapackage restore
+# resolve an unmerged single-target-framework package and fail with NU1202.
+WORK="$(mktemp -d)"
+trap 'rm -rf "${WORK}"' EXIT
 
-SDK10_DIR="$(mktemp -d)"
-trap 'rm -rf "${SDK10_DIR}"' EXIT
+PASS1_DIR="${WORK}/net9-pass"
+PASS2_DIR="${WORK}/net10-pass"
+
+SDK10_DIR="${WORK}/sdk10"
+mkdir -p "${SDK10_DIR}"
 cat > "${SDK10_DIR}/global.json" <<EOF
 { "sdk": { "version": "${PASS2_SDK}", "rollForward": "latestFeature" } }
 EOF
 
-for project in "${PROJECTS[@]}"; do
+# Packs one project in both SDK bands, then merges the two packages into artifacts/.
+pack_and_merge() {
+    local project="$1" name
     name="$(basename "${project}" .csproj)"
 
     echo "==> packing ${name} (${PASS1_BAND} band)"
@@ -104,12 +112,26 @@ for project in "${PROJECTS[@]}"; do
         -p:AntMediaSdkBand="${PASS2_BAND}" \
         ${VERSION_ARG} \
         -o "${PASS2_DIR}" )
+
+    echo "==> merging ${name}"
+    python3 "${SCRIPT_DIR}/merge-packages.py" "${PASS1_DIR}" "${PASS2_DIR}" "${OUTPUT}"
+
+    rm -rf "${PASS1_DIR}" "${PASS2_DIR}"
+}
+
+for project in "${PLATFORM_PROJECTS[@]}"; do
+    pack_and_merge "${project}"
 done
 
-echo "==> merging target frameworks"
-python3 "${SCRIPT_DIR}/merge-packages.py" "${PASS1_DIR}" "${PASS2_DIR}" "${OUTPUT}"
-
-rm -rf "${PASS1_DIR}" "${PASS2_DIR}"
+if [ "${PACK_METAPACKAGE}" = true ]; then
+    # Packed last, and only after the platform packages have been merged into artifacts/. It
+    # declares a pinned dependency on each of them, so NuGet resolves them at restore time and
+    # would reject a package that carried only one band's target frameworks.
+    #
+    # With scope 'apple' the Android package must be placed in artifacts/ by the caller; CI
+    # downloads it from the pack-android job.
+    pack_and_merge "${ROOT}/src/AntMedia.Net/AntMedia.Net.csproj"
+fi
 
 echo "==> packages in ${OUTPUT}:"
 ls -1 "${OUTPUT}"/*.nupkg

@@ -111,6 +111,9 @@ launch_pid=$!
 
 ( sleep 300; kill -TERM "${launch_pid}" 2>/dev/null ) &
 watchdog_pid=$!
+# Detached so the shell does not print a "Terminated" job notice over the test output when the
+# watchdog is killed on the happy path.
+disown "${watchdog_pid}" 2>/dev/null || true
 
 set +e
 wait "${launch_pid}"

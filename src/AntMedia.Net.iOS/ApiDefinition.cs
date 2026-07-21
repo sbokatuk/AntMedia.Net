@@ -135,10 +135,12 @@ interface AMSClient
 
     /// <summary>
     /// The callback receiver. Held weakly, so the caller must keep its own reference to it.
+    /// Assign a subclass of <see cref="AMSClientDelegate" />, or set
+    /// <see cref="WeakDelegate" /> to any object implementing the protocol.
     /// </summary>
     [Wrap("WeakDelegate")]
     [NullAllowed]
-    IAMSClientDelegate Delegate { get; set; }
+    AMSClientDelegate Delegate { get; set; }
 
     /// <summary>Writes SDK log messages to the console. Off by default.</summary>
     [Static]

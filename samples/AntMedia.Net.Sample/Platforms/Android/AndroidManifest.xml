@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<application android:allowBackup="true" android:icon="@mipmap/appicon" android:supportsRtl="true" />
+
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+	<!-- Publishing captures from the camera and microphone. -->
+	<uses-permission android:name="android.permission.CAMERA" />
+	<uses-permission android:name="android.permission.RECORD_AUDIO" />
+	<!-- The SDK routes audio and switches the speaker on and off. -->
+	<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+	<!-- Android 12+ requires this to route audio to a Bluetooth headset. -->
+	<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+	<!-- Declared as optional so the app still installs on a device with no camera, e.g. for play-only use. -->
+	<uses-feature android:name="android.hardware.camera" android:required="false" />
+	<uses-feature android:name="android.hardware.microphone" android:required="false" />
+</manifest>

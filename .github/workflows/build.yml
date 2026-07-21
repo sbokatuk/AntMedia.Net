@@ -138,10 +138,20 @@ jobs:
 
   pack-apple:
     name: pack iOS
-    needs: pins
+    # Also needs pack-android: the metapackage declares a pinned dependency on
+    # AntMedia.Net.Android for the Android target frameworks, and NuGet has to resolve it at
+    # restore time, so that package must already exist in artifacts/ on this runner.
+    needs: [pins, pack-android]
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download the Android package
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages-android
+          # NuGet.config exposes artifacts/ as the local-artifacts source.
+          path: artifacts
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
@@ -179,6 +189,21 @@ jobs:
 
       - name: Pack
         run: ./build/BuildNugets.sh "${{ inputs.version }}" apple
+
+      - name: Build the sample against the packed packages
+        run: |
+          # Proves the metapackage is actually consumable: it restores, resolves to the right
+          # platform binding per target framework, and the iOS half links — which is where a
+          # dynamic xcframework that was embedded instead of shipped as content fails.
+          dotnet workload install maui-android maui-ios
+          for tfm in net9.0-android35.0 net9.0-ios18.0; do
+            echo "::group::sample ${tfm}"
+            dotnet build samples/AntMedia.Net.Sample \
+              -c Release \
+              -f "${tfm}" \
+              -p:AntMediaPackageVersion="${{ inputs.version }}"
+            echo "::endgroup::"
+          done
 
       - name: Upload packages
         uses: actions/upload-artifact@v4

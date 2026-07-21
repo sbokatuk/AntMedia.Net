@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:streaming="clr-namespace:AntMedia.Net.Sample.Streaming"
+             x:Class="AntMedia.Net.Sample.MainPage"
+             Title="AntMedia.Net">
+
+    <Grid RowDefinitions="Auto,*,Auto,Auto" Padding="16" RowSpacing="12">
+
+        <VerticalStackLayout Grid.Row="0" Spacing="8">
+            <Entry x:Name="ServerUrlEntry"
+                   Placeholder="wss://your-server:5443/WebRTCAppEE/websocket"
+                   Keyboard="Url" />
+            <Entry x:Name="StreamIdEntry"
+                   Placeholder="stream id" />
+        </VerticalStackLayout>
+
+        <!--
+          Both surfaces exist for the whole session: creating one on demand would mean creating a
+          native renderer mid-layout, which neither SDK expects.
+        -->
+        <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="8">
+            <streaming:VideoSurface x:Name="LocalSurface" Grid.Column="0" />
+            <streaming:VideoSurface x:Name="RemoteSurface" Grid.Column="1" />
+        </Grid>
+
+        <HorizontalStackLayout Grid.Row="2" Spacing="8" HorizontalOptions="Center">
+            <Button x:Name="PublishButton" Text="Publish" Clicked="OnPublishClicked" />
+            <Button x:Name="PlayButton" Text="Play" Clicked="OnPlayClicked" />
+            <Button x:Name="StopButton" Text="Stop" Clicked="OnStopClicked" IsEnabled="False" />
+        </HorizontalStackLayout>
+
+        <ScrollView Grid.Row="3" x:Name="StatusScroll" HeightRequest="120">
+            <Label x:Name="StatusLabel" FontFamily="OpenSansRegular" FontSize="12" />
+        </ScrollView>
+
+    </Grid>
+
+</ContentPage>

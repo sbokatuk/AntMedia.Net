@@ -24,7 +24,12 @@ native/
 src/                         the binding projects and the metapackage
 tests/                       package validation + on-device smoke tests
 samples/                     the MAUI sample app
+AntMedia.Net.sln             every project above
 ```
+
+The solution spans .NET 8/9/10 and both platforms, so no single SDK can build all of it at once —
+`dotnet build AntMedia.Net.sln` will fail on whichever band the current SDK does not own. Build
+individual projects, or use `build/BuildNugets.sh`, which handles the bands.
 
 ## Why two passes
 
@@ -79,6 +84,19 @@ header.
 
 Ant Media's own `WebRTC.xcframework` (their build of libwebrtc, ~26 MB) is plain Objective-C and
 is copied through as-is.
+
+Two details are load-bearing and easy to undo by accident:
+
+- **The facade classes carry explicit `@objc(AMSClient)` names.** Without them Swift exports the
+  class as `_OBJC_CLASS_$__TtC12WebRTCiOSSDK9AMSClient` while the .NET binding links against
+  `_OBJC_CLASS_$_AMSClient`, and every consuming app fails at link time. `fetch-ios.sh` checks the
+  exported symbols with `nm` and fails the build if the mangled form comes back.
+- **Both xcframeworks are dynamic, so they ship as package content, not inside the assembly.**
+  A dynamic framework embedded in a binding assembly never reaches the consuming app's linker,
+  which fails with `"_OBJC_CLASS_$_AMSClient", referenced from: <initial-undefines>`. The package
+  therefore sets `NoBindingEmbedding=true`, ships the frameworks under `native/`, and declares
+  them as `NativeReference` in the consuming project from
+  [`build/AntMedia.Net.iOS.targets`](../src/AntMedia.Net.iOS/build/AntMedia.Net.iOS.targets).
 
 Requires macOS with Xcode and the `xcodeproj` Ruby gem (installed by the script if missing).
 

@@ -119,6 +119,18 @@ if ! grep -q 'AMSClient' "${HEADER}" 2>/dev/null; then
     exit 1
 fi
 
+# The header is necessary but not sufficient. A Swift @objc class with no explicit Objective-C
+# name is exported under its mangled name (_OBJC_CLASS_$__TtC12WebRTCiOSSDK9AMSClient) even though
+# the header calls it AMSClient, while the .NET binding links against _OBJC_CLASS_$_AMSClient — so
+# every consuming app fails at link time with an undefined symbol, and nothing before that notices.
+for class in AMSClient AMSStreamInformation; do
+    if ! nm -gU "${DEVICE_FRAMEWORK}/${SCHEME}" 2>/dev/null \
+        | grep -q "_OBJC_CLASS_\\\$_${class}\$"; then
+        echo "::error::${SCHEME} does not export _OBJC_CLASS_\$_${class}; the facade class needs an explicit @objc(${class}) name" >&2
+        exit 1
+    fi
+done
+
 echo "==> creating the xcframework"
 rm -rf "${WORK_DIR}/${SCHEME}.xcframework"
 xcodebuild -create-xcframework \

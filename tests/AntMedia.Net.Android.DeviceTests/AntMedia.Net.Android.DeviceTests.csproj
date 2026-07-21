@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    On-device smoke test for the packed AntMedia.Net.Android package. Deliberately a plain
+    .NET for Android app rather than a MAUI one: it starts faster on an emulator and its failures
+    are about the binding rather than about MAUI's startup.
+
+    Driven by .github/scripts/run-android-device-tests.sh, which builds it with -t:Install against
+    a specific package version and target framework, launches it and reads the verdict from logcat.
+  -->
+  <PropertyGroup>
+    <!-- Set by the runner script; the default is the newest band so a bare build is meaningful. -->
+    <AntMediaDeviceTargetFramework Condition=" '$(AntMediaDeviceTargetFramework)' == '' ">net10.0-android36.0</AntMediaDeviceTargetFramework>
+    <TargetFramework>$(AntMediaDeviceTargetFramework)</TargetFramework>
+
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+
+    <ApplicationId>com.sbokatuk.antmedia.devicetests</ApplicationId>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
+    <SupportedOSPlatformVersion>23.0</SupportedOSPlatformVersion>
+
+    <!--
+      The point of this app is to prove the *packaged* binding works, so it must not be trimmed
+      down to whatever the test code statically touches, and the native libraries must all ship.
+    -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <!-- Release defaults to AOT, which the SDK only allows alongside trimming (XA1030). -->
+    <RunAOTCompilation>false</RunAOTCompilation>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      The packed .nupkg from artifacts/ (exposed by NuGet.config), never the binding project:
+      the e2e has to run against exactly what would be published.
+    -->
+    <PackageReference Include="AntMedia.Net.Android" Version="$(AntMediaPackageVersion)" />
+  </ItemGroup>
+
+  <Target Name="ValidateAntMediaPackageVersion" BeforeTargets="Restore;Build"
+          Condition=" '$(AntMediaPackageVersion)' == '' ">
+    <Error Text="AntMediaPackageVersion must be set, e.g. -p:AntMediaPackageVersion=2.17.2-beta.1. Run build/BuildNugets.sh first." />
+  </Target>
+
+</Project>

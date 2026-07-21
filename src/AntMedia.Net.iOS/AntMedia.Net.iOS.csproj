@@ -15,7 +15,16 @@
     <ImplicitUsings>false</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsBindingProject>true</IsBindingProject>
-    <NoBindingEmbedding>false</NoBindingEmbedding>
+    <!--
+      The xcframeworks are dynamic, so they cannot be embedded into this assembly and linked from
+      there — the consuming app's linker never sees them and fails on undefined _OBJC_CLASS_$_*
+      symbols. They ship as package content instead and are declared as NativeReference in the
+      consuming project by build/AntMedia.Net.iOS.targets.
+    -->
+    <NoBindingEmbedding>true</NoBindingEmbedding>
+
+    <!-- CS1591: the generated binding carries no XML doc comments. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 
   <Target Name="ValidateAntMediaSdkBand" BeforeTargets="Build;Pack"
@@ -64,6 +73,16 @@
   <ItemGroup>
     <None Include="../../Nugets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+
+    <!--
+      The xcframeworks travel as package content, not inside the assembly, and the .targets below
+      wires them into the consuming project. Packed once at the package root rather than per
+      target framework: they are ~28 MB and identical for all three.
+    -->
+    <None Include="lib/WebRTCiOSSDK.xcframework/**" Pack="true" PackagePath="native/WebRTCiOSSDK.xcframework/" Visible="false" />
+    <None Include="lib/WebRTC.xcframework/**" Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
+
+    <None Include="build/AntMedia.Net.iOS.targets" Pack="true" PackagePath="build/" Visible="false" />
   </ItemGroup>
 
 </Project>
