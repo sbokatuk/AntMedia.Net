@@ -153,6 +153,14 @@ jobs:
           # NuGet.config exposes artifacts/ as the local-artifacts source.
           path: artifacts
 
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # Pinned rather than relying on the image default: this job builds the metapackage's
+          # Android target frameworks and the sample's Android leg, and .NET for Android needs 17+.
+          java-version: '17'
+
       - name: Set up .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -174,6 +182,14 @@ jobs:
               && dotnet workload install ios android )
           done
 
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          # Needed on this runner too, even though it packs the Apple side: the metapackage
+          # targets the Android TFMs as well, and building net8.0-android34.0 resolves
+          # android-34's android.jar (XA5207 without it). The sample build below needs 35.
+          packages: 'platforms;android-34 platforms;android-35 platforms;android-36'
+
       - name: Cache the Ant Media iOS xcframeworks
         id: xcframework
         uses: actions/cache@v4
@@ -190,6 +206,18 @@ jobs:
       - name: Pack
         run: ./build/BuildNugets.sh "${{ inputs.version }}" apple
 
+      # Uploaded before the sample is built so that a failure in that check still leaves the
+      # packages available to download and inspect.
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-apple
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Build the sample against the packed packages
         run: |
           # Proves the metapackage is actually consumable: it restores, resolves to the right
@@ -204,16 +232,6 @@ jobs:
               -p:AntMediaPackageVersion="${{ inputs.version }}"
             echo "::endgroup::"
           done
-
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: nuget-packages-apple
-          path: |
-            artifacts/*.nupkg
-            artifacts/*.snupkg
-          if-no-files-found: error
-          retention-days: 7
 
   validate:
     name: validate packages
@@ -264,6 +282,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # The smoke app is a real Android app build, which needs JDK 17+; pinned rather than
+          # relying on whatever the runner image happens to default to.
+          java-version: '17'
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4

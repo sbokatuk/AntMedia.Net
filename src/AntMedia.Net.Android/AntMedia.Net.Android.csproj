@@ -17,8 +17,20 @@
     <AndroidClassParser>class-parse</AndroidClassParser>
     <AndroidCodegenTarget>XAJavaInterop1</AndroidCodegenTarget>
 
-    <!-- CS1591: the generated binding carries no XML doc comments. -->
-    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <!--
+      All of these come from generated binding code, and between them they account for ~260 of the
+      ~280 warnings this project emits — enough noise to hide a real one.
+
+        CS1591          the generated binding carries no XML doc comments
+        CS0108/CS0114   Java's org.webrtc class hierarchy redeclares members the generator cannot
+                        express as overrides, so the C# it emits hides them
+        BG8401          members skipped because their managed name collides with another; the
+                        collisions that actually matter are fixed in Transforms/Metadata.xml
+
+      BG8605/BG8606 (unresolved Java types) and BG8801 (invalid parameter type) are deliberately
+      left visible: they say something was left out of the binding, which is worth noticing.
+    -->
+    <NoWarn>$(NoWarn);CS1591;CS0108;CS0114;BG8401</NoWarn>
   </PropertyGroup>
 
   <Target Name="ValidateAntMediaSdkBand" BeforeTargets="Build;Pack"
