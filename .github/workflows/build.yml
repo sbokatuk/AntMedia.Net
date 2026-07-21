@@ -1,0 +1,337 @@
+name: build
+
+# Reusable pipeline: builds the native Ant Media SDKs, packs every AntMedia.Net package at a given
+# version, validates the packed packages, runs the on-device smoke tests, and uploads the packages
+# as an artifact. Callers (pr.yml, release.yml) decide the version and what to do with the result.
+#
+# Android and Apple pack on separate runners: Android needs only a JDK and the Android SDK, while
+# iOS needs Xcode. Splitting them keeps the expensive macOS runner off the Android critical path.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: NuGet version to stamp on every package.
+        required: true
+        type: string
+      android-tag:
+        description: >
+          WebRTC-Android-SDK tag to build. Defaults to AntMediaAndroidTag in
+          Directory.Build.props.
+        required: false
+        default: ''
+        type: string
+      ios-commit:
+        description: >
+          WebRTC-iOS-SDK commit to build. Defaults to AntMediaIosCommit in Directory.Build.props.
+        required: false
+        default: ''
+        type: string
+      e2e-android-target-framework:
+        description: Target framework the Android emulator smoke test runs against.
+        required: false
+        default: net10.0-android36.0
+        type: string
+      e2e-ios-target-framework:
+        description: Target framework the iOS simulator smoke test runs against.
+        required: false
+        default: net10.0-ios26.0
+        type: string
+
+env:
+  DOTNET_NOLOGO: 'true'
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 'true'
+  DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
+
+jobs:
+  pins:
+    name: resolve native pins
+    runs-on: ubuntu-latest
+    outputs:
+      android-tag: ${{ steps.resolve.outputs.android-tag }}
+      ios-commit: ${{ steps.resolve.outputs.ios-commit }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: resolve
+        run: |
+          # build/pins.sh is the one place that parses Directory.Build.props; the inputs override
+          # it so an older SDK line can be rebuilt without editing the branch.
+          . ./build/pins.sh
+          android="${{ inputs.android-tag }}"
+          ios="${{ inputs.ios-commit }}"
+          echo "android-tag=${android:-${ANTMEDIA_ANDROID_TAG}}" >> "$GITHUB_OUTPUT"
+          echo "ios-commit=${ios:-${ANTMEDIA_IOS_COMMIT}}" >> "$GITHUB_OUTPUT"
+          {
+            echo "Binding Ant Media Android \`${android:-${ANTMEDIA_ANDROID_TAG}}\`"
+            echo "and iOS \`${ios:-${ANTMEDIA_IOS_COMMIT}}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  pack-android:
+    name: pack Android
+    needs: pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # AGP 7.4.2 / Gradle 7.5, which is what the Ant Media Android SDK builds with.
+          java-version: '17'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          # 9.0.x packs net8+net9 (global.json pins it) and 10.0.x packs net10.
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Android workloads for every SDK band
+        run: |
+          # Each band supplies different reference packs: net8.0-android34.0 compiles against
+          # Microsoft.Android.Ref.34 from the .NET 9 band and net10.0-android36.0 against Ref.36
+          # from the .NET 10 band. The SDK is chosen by the global.json in the working directory,
+          # so each band is installed from a scratch directory pinned to that SDK.
+          for major in 9 10; do
+            dir="${RUNNER_TEMP}/sdk${major}"
+            mkdir -p "${dir}"
+            sdk=$(dotnet --list-sdks | grep "^${major}\." | tail -1 | cut -d' ' -f1)
+            echo "installing android workload for SDK ${sdk}"
+            ( cd "${dir}" \
+              && dotnet new globaljson --sdk-version "${sdk}" --force \
+              && dotnet workload install android )
+          done
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34 platforms;android-35 platforms;android-36'
+
+      - name: Cache the Ant Media Android framework
+        id: aar
+        uses: actions/cache@v4
+        with:
+          path: src/AntMedia.Net.Android/Jars
+          # The tag is part of the key: without it a build of a different tag would restore the
+          # previous tag's .aar and silently bind the wrong SDK.
+          key: antmedia-aar-${{ needs.pins.outputs.android-tag }}-${{ hashFiles('native/android/**') }}
+
+      - name: Build the Ant Media Android framework
+        if: steps.aar.outputs.cache-hit != 'true'
+        run: ./native/android/fetch-android.sh "${{ needs.pins.outputs.android-tag }}"
+
+      - name: Pack
+        run: ./build/BuildNugets.sh "${{ inputs.version }}" android
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-android
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
+  pack-apple:
+    name: pack iOS
+    needs: pins
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install iOS and Android workloads for every SDK band
+        run: |
+          # The metapackage targets both platforms' TFMs, so this runner needs both workloads even
+          # though it only packs the Apple side of the binding.
+          for major in 9 10; do
+            dir="${RUNNER_TEMP}/sdk${major}"
+            mkdir -p "${dir}"
+            sdk=$(dotnet --list-sdks | grep "^${major}\." | tail -1 | cut -d' ' -f1)
+            echo "installing ios+android workloads for SDK ${sdk}"
+            ( cd "${dir}" \
+              && dotnet new globaljson --sdk-version "${sdk}" --force \
+              && dotnet workload install ios android )
+          done
+
+      - name: Cache the Ant Media iOS xcframeworks
+        id: xcframework
+        uses: actions/cache@v4
+        with:
+          path: src/AntMedia.Net.iOS/lib
+          # Keyed on the upstream commit *and* on our facade sources: changing the facade changes
+          # the framework's Objective-C surface and therefore the generated binding.
+          key: antmedia-xcframework-${{ needs.pins.outputs.ios-commit }}-${{ hashFiles('native/ios/**') }}
+
+      - name: Build the Ant Media iOS xcframework
+        if: steps.xcframework.outputs.cache-hit != 'true'
+        run: ./native/ios/fetch-ios.sh "${{ needs.pins.outputs.ios-commit }}"
+
+      - name: Pack
+        run: ./build/BuildNugets.sh "${{ inputs.version }}" apple
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages-apple
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
+  validate:
+    name: validate packages
+    needs: [pack-android, pack-apple]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          # Both pack jobs write into artifacts/, so merging the two downloads reassembles the
+          # full set the package tests expect to find.
+          pattern: nuget-packages-*
+          merge-multiple: true
+          path: artifacts
+
+      - name: Run package tests
+        run: dotnet test tests/AntMedia.Net.PackageTests --logger 'trx;LogFileName=package-tests.trx'
+
+      - name: Upload the combined package set
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-test-results
+          path: '**/*.trx'
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-android:
+    name: Android emulator smoke test
+    needs: [pack-android, validate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Android workload
+        run: |
+          # The smoke app is built for the target framework under test, so install the workload
+          # for the band that owns it. global.json pins .NET 9; the app may need .NET 10.
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install android )
+          dotnet workload install android
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 platforms;android-36'
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run smoke tests on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          # The framework's jniLibs carry x86_64, so an x86_64 emulator can load libjingle_peerconnection.
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
+
+      - name: Upload device logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-device-test-logs
+          path: device-tests-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-ios:
+    name: iOS simulator smoke test
+    needs: [pack-apple, validate]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install iOS workload
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install ios )
+          dotnet workload install ios
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Run smoke tests on simulator
+        run: ./.github/scripts/run-ios-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-ios-target-framework }}"
+
+      - name: Upload simulator logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-device-test-logs
+          path: device-tests-simulator.log
+          if-no-files-found: ignore
+          retention-days: 7

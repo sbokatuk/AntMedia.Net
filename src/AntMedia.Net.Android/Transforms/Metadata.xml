@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fixes applied to the Java API before the C# binding is generated.
+  See https://learn.microsoft.com/dotnet/android/binding-libs/customizing-bindings/java-bindings-metadata
+-->
+<metadata>
+
+  <!--
+    org.webrtc.StatsReport.Value binds to a nested type whose default managed name collides with
+    the StatsReport.Value *property* generated from the enclosing class.
+  -->
+  <attr path="/api/package[@name='org.webrtc']/class[@name='StatsReport.Value']"
+        name="managedName">StatsReportValue</attr>
+
+  <!--
+    Getters the generator would otherwise turn into properties whose names collide with an
+    inherited member. Blanking propertyName keeps them as plain methods.
+  -->
+  <attr path="/api/package[@name='org.webrtc']/class[@name='WrappedNativeVideoEncoder']/method[@name='getScalingSettings' and count(parameter)=0]"
+        name="propertyName"></attr>
+  <attr path="/api/package[@name='org.webrtc']/class[@name='TextureBufferImpl']/method[@name='getType' and count(parameter)=0]"
+        name="propertyName"></attr>
+
+  <!--
+    IWebRTCListener.onNewVideoTrack is overloaded — (VideoTrack) and (VideoTrack, String) — and
+    the generator names the Implementor's handler field after the *method*, so both overloads
+    produce OnNewVideoTrackHandler and the binding does not compile (CS0102). eventName does not
+    help: it renames the event, not the handler field. Renaming the managed method of the
+    two-argument overload is what separates them; the JNI signature is unaffected, so the binding
+    still dispatches to the right Java method.
+  -->
+    DefaultWebRTCListener implements the interface, so its overload has to be renamed in step or
+    it no longer satisfies the renamed interface member (CS0535).
+  -->
+  <attr path="/api/package[@name='io.antmedia.webrtcandroidframework.api']/interface[@name='IWebRTCListener']/method[@name='onNewVideoTrack' and count(parameter)=2]"
+        name="managedName">OnNewVideoTrackWithId</attr>
+  <attr path="/api/package[@name='io.antmedia.webrtcandroidframework.api']/class[@name='DefaultWebRTCListener']/method[@name='onNewVideoTrack' and count(parameter)=2]"
+        name="managedName">OnNewVideoTrackWithId</attr>
+
+</metadata>

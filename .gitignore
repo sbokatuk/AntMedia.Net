@@ -399,3 +399,20 @@ FodyWeavers.xsd
 Bindings/AntMedia.Net.Android/lib
 Bindings/AntMedia.Net.iOS/lib
 Bindings/AntMedia.Net.WebRTC.Dependency.iOS/lib
+
+# AntMedia.Net
+# Packed output. The directory itself is tracked so the local-artifacts NuGet source in
+# NuGet.config resolves before anything has been packed.
+!artifacts/.gitkeep
+
+# Native working tree: upstream checkouts and the artifacts built from them. Everything here is
+# reproducible from the pins in Directory.Build.props via native/*/fetch-*.sh.
+native/build/
+
+# Native payloads dropped into the binding projects by the fetch scripts.
+src/AntMedia.Net.Android/Jars/*.aar
+src/AntMedia.Net.iOS/lib/
+
+# Device test output
+device-tests-logcat.txt
+device-tests-simulator.log

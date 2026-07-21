@@ -1,0 +1,7 @@
+// Overlaid onto the WebRTC-Android-SDK checkout by native/android/fetch-android.sh.
+//
+// Upstream's settings.gradle also includes ':webrtc-android-sample-app', which applies the
+// google-services plugin and expects a google-services.json that is not in the repository.
+// Gradle configures every included project even when only one is being assembled, so leaving the
+// sample app in fails the build before :webrtc-android-framework:assembleRelease ever runs.
+include ':webrtc-android-framework'

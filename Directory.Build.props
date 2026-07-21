@@ -1,0 +1,90 @@
+<Project>
+
+  <!--
+    ============================================================================
+    Native SDK pins
+    ============================================================================
+    Everything the build consumes from Ant Media is pinned here. CI caches the
+    fetched/built native artifacts keyed on these values, so changing one is what
+    triggers a rebuild of the native layer.
+  -->
+  <PropertyGroup>
+    <!-- Package version base. Tracks the Ant Media SDK line these bindings bind. -->
+    <AntMediaVersion>2.17.2</AntMediaVersion>
+    <VersionPrefix>$(AntMediaVersion)</VersionPrefix>
+
+    <!--
+      github.com/ant-media/WebRTC-Android-SDK. Pinned to a tag: the AAR is built from source by
+      native/android/fetch-android.sh, and tracking master would make every build irreproducible.
+    -->
+    <AntMediaAndroidRepository>https://github.com/ant-media/WebRTC-Android-SDK</AntMediaAndroidRepository>
+    <AntMediaAndroidTag>v2.17.2</AntMediaAndroidTag>
+
+    <!--
+      github.com/ant-media/WebRTC-iOS-SDK. Pinned to a commit rather than a tag: upstream has
+      tagged the iOS repository exactly once (v2.10.0), so a tag pin would strand us on a 2020
+      release. native/ios/fetch-ios.sh rebuilds the xcframework from this commit.
+    -->
+    <AntMediaIosRepository>https://github.com/ant-media/WebRTC-iOS-SDK</AntMediaIosRepository>
+    <AntMediaIosCommit>47e2b0201959f56f26096a00edd7277d2cb87449</AntMediaIosCommit>
+  </PropertyGroup>
+
+  <!--
+    ============================================================================
+    Target frameworks
+    ============================================================================
+    No single .NET SDK can build net8, net9 and net10 for a given platform: each SDK's workload
+    carries only the current band and the previous one. Verified support matrix:
+
+                  SDK 9 band                          SDK 10 band
+      Android     net8.0-android34.0, net9.0-*35.0    net10.0-android36.0
+      iOS         net8.0-ios18.0,     net9.0-ios18.0  net10.0-ios26.0
+
+    So each binding is packed twice and the results are merged - see build/BuildNugets.sh and
+    build/merge-packages.py. AntMediaSdkBand selects which pass a given build is.
+
+    The platform version is pinned per TFM deliberately. Bare 'net8.0-android' resolves to
+    android21.0, which silently produces an empty binding assembly with no .aar payload.
+  -->
+  <PropertyGroup>
+    <AntMediaSdkBand Condition=" '$(AntMediaSdkBand)' == '' ">net9</AntMediaSdkBand>
+
+    <AntMediaAndroidTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0-android34.0;net9.0-android35.0</AntMediaAndroidTargetFrameworks>
+    <AntMediaAndroidTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-android36.0</AntMediaAndroidTargetFrameworks>
+
+    <AntMediaIosTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0-ios18.0;net9.0-ios18.0</AntMediaIosTargetFrameworks>
+    <AntMediaIosTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-ios26.0</AntMediaIosTargetFrameworks>
+  </PropertyGroup>
+
+  <!--
+    ============================================================================
+    Shared package metadata
+    ============================================================================
+  -->
+  <PropertyGroup>
+    <Authors>s.bokatuk</Authors>
+    <Company>s.bokatuk</Company>
+    <Copyright>Copyright © s.bokatuk</Copyright>
+    <PackageProjectUrl>https://github.com/sbokatuk/AntMedia.Net</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/sbokatuk/AntMedia.Net</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition=" '$(GITHUB_ACTIONS)' == 'true' ">true</ContinuousIntegrationBuild>
+
+    <!--
+      net8.0-* and net9.0-* are past end of support, which the SDK reports as an error. They ship
+      deliberately: .NET 8 is still where a large share of MAUI apps are.
+    -->
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <CheckEolWorkloads>false</CheckEolWorkloads>
+  </PropertyGroup>
+
+</Project>

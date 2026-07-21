@@ -1,0 +1,69 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!--
+      Set per SDK band in Directory.Build.props: the .NET 9 band builds net8+net9 and the .NET 10
+      band builds net10, so build/BuildNugets.sh packs twice and merges the results.
+    -->
+    <TargetFrameworks>$(AntMediaIosTargetFrameworks)</TargetFrameworks>
+    <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
+
+    <AssemblyName>AntMedia.Net.iOS</AssemblyName>
+    <RootNamespace>AntMedia.Net.iOS</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>false</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsBindingProject>true</IsBindingProject>
+    <NoBindingEmbedding>false</NoBindingEmbedding>
+  </PropertyGroup>
+
+  <Target Name="ValidateAntMediaSdkBand" BeforeTargets="Build;Pack"
+          Condition=" '$(TargetFrameworks)' == '' ">
+    <Error Text="AntMediaSdkBand must be 'net9' or 'net10', but was '$(AntMediaSdkBand)'." />
+  </Target>
+
+  <Target Name="ValidateAntMediaXcframeworks" BeforeTargets="Build;Pack"
+          Condition="!Exists('$(MSBuildProjectDirectory)/lib/WebRTCiOSSDK.xcframework')">
+    <Error Text="lib/WebRTCiOSSDK.xcframework is missing. Run native/ios/fetch-ios.sh first." />
+  </Target>
+
+  <ItemGroup>
+    <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
+    <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Built from source with our @objc facade compiled in — see native/ios/fetch-ios.sh. The
+      xcframework Ant Media checks in cannot be used: its Objective-C surface is two empty classes.
+    -->
+    <NativeReference Include="lib/WebRTCiOSSDK.xcframework">
+      <Kind>Framework</Kind>
+    </NativeReference>
+
+    <!--
+      Ant Media's build of libwebrtc, taken as-is. WebRTCiOSSDK links against it, so it has to
+      ship alongside; the Frameworks list is what libwebrtc itself dlopens.
+    -->
+    <NativeReference Include="lib/WebRTC.xcframework">
+      <Kind>Framework</Kind>
+      <Frameworks>AVFoundation AudioToolbox CoreAudio CoreMedia CoreVideo CoreGraphics VideoToolbox Metal MetalKit</Frameworks>
+    </NativeReference>
+  </ItemGroup>
+
+  <!-- Packaging -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>AntMedia.Net.iOS</PackageId>
+    <Title>.NET for iOS bindings for the Ant Media WebRTC iOS SDK.</Title>
+    <Description>.NET for iOS / .NET MAUI bindings for the Ant Media WebRTC iOS SDK, built from ant-media/WebRTC-iOS-SDK. Lets a .NET app publish and play WebRTC streams through an Ant Media Server. The upstream SDK is Swift and exposes almost nothing to Objective-C, so this package binds an @objc facade maintained alongside it — see the project site for the API surface.</Description>
+    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;iOS;dotnet-ios;Binding</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../Nugets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+</Project>
