@@ -42,8 +42,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>AntMedia.Net.Maui</PackageId>
     <Title>.NET MAUI video view and helpers for AntMedia.Net.</Title>
-    <Description>Adds an AntMediaVideoView control and the platform glue a .NET MAUI app needs to use AntMedia.Net: rendering into a native WebRTC surface, and supplying the Android Activity the SDK requires. Add AntMedia.Net on its own if you are not using MAUI.</Description>
-    <PackageTags>AntMedia;WebRTC;streaming;SDK;MAUI;Android;iOS;video</PackageTags>
+    <Description>Adds an AntMediaVideoView control and the platform glue a .NET MAUI app needs to use AntMedia.Net: rendering into a native WebRTC surface on Android, iOS and Mac Catalyst, and supplying the Android Activity the SDK requires. Add AntMedia.Net on its own if you are not using MAUI.</Description>
+    <PackageTags>AntMedia;WebRTC;streaming;SDK;MAUI;Android;iOS;MacCatalyst;video</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

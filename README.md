@@ -1,6 +1,7 @@
 # AntMedia.Net
 
-.NET bindings for the [Ant Media][antmedia] WebRTC SDKs, with one API across Android and iOS.
+.NET bindings for the [Ant Media][antmedia] WebRTC SDKs, with one API across Android, iOS and
+Mac Catalyst.
 Publish and play WebRTC streams through an Ant Media Server from C#, in .NET MAUI or plain
 .NET for Android / iOS.
 
@@ -25,14 +26,16 @@ await client.PublishAsync("my-stream");  // completes when the server confirms
 
 | Package | What it is | Target frameworks |
 | --- | --- | --- |
-| `AntMedia.Net.Maui` | MAUI video view, handlers, and the Android `Activity` plumbing | net8.0, net9.0, net10.0 (android + ios) |
-| `AntMedia.Net` | The cross-platform client: `IAntMediaClient`, options, events, async | net8.0, net9.0, net10.0 (android + ios) |
+| `AntMedia.Net.Maui` | MAUI video view, handlers, and the Android `Activity` plumbing | net8.0, net9.0, net10.0 (android + ios + maccatalyst) |
+| `AntMedia.Net` | The cross-platform client: `IAntMediaClient`, options, events, async | net8.0, net9.0, net10.0 (android + ios + maccatalyst) |
 | `AntMedia.Net.Android` | The raw binding to the Ant Media Android SDK | `net8.0-android34.0`, `net9.0-android35.0`, `net10.0-android36.0` |
 | `AntMedia.Net.iOS` | The raw binding to the Ant Media iOS SDK | `net8.0-ios18.0`, `net9.0-ios18.0`, `net10.0-ios26.0` |
+| `AntMedia.Net.Mac` | The same binding, built for Mac Catalyst (Apple Silicon) | `net8.0-maccatalyst18.0`, `net9.0-maccatalyst18.0`, `net10.0-maccatalyst26.0` |
 
 Each package pulls in the one below it, so a single reference is enough. Drop to a platform
 binding directly when you need something the cross-platform API does not expose — the full SDK
-surface is there under `AntMedia.WebRTC.*` (Android) and `AntMedia.Net.iOS.*` (iOS).
+surface is there under `AntMedia.WebRTC.*` (Android), `AntMedia.Net.iOS.*` (iOS) and
+`AntMedia.Net.Mac.*` (Mac Catalyst).
 
 ## Why there is a cross-platform layer
 

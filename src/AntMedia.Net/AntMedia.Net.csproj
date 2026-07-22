@@ -58,8 +58,8 @@
     <IsPackable>true</IsPackable>
     <PackageId>AntMedia.Net</PackageId>
     <Title>Cross-platform .NET client for the Ant Media WebRTC SDKs.</Title>
-    <Description>One API over the Ant Media WebRTC SDKs for Android and iOS: publish and play streams with awaitable calls and ordinary .NET events, instead of writing a per-platform adapter over a Java listener interface and an Objective-C delegate. Pulls in the platform binding that matches whichever target framework you build. For .NET MAUI apps, add AntMedia.Net.Maui for the video view.</Description>
-    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;Android;iOS;Binding</PackageTags>
+    <Description>One API over the Ant Media WebRTC SDKs for Android, iOS and Mac Catalyst: publish and play streams with awaitable calls and ordinary .NET events, instead of writing a per-platform adapter over a Java listener interface and an Objective-C delegate. Pulls in the platform binding that matches whichever target framework you build. For .NET MAUI apps, add AntMedia.Net.Maui for the video view.</Description>
+    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;Android;iOS;MacCatalyst;Binding</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
