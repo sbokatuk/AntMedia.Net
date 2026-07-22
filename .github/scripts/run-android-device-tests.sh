@@ -80,9 +80,28 @@ else
     adb install -r "${APK}"
 fi
 
+# Granted rather than prompted for: there is nobody to tap a dialog on a CI emulator, and without
+# them the SDK declines to publish, logs "Camera permissions not granted" and then raises no
+# callback at all - so the live check would fail as an unexplained timeout.
+# Ignored failures: a device below Android 6 has them granted at install time and `pm grant`
+# errors, which is not a problem worth failing the run over.
+echo "==> granting camera and microphone"
+for permission in android.permission.CAMERA android.permission.RECORD_AUDIO android.permission.MODIFY_AUDIO_SETTINGS; do
+    adb shell pm grant "${PACKAGE_NAME}" "${permission}" 2>/dev/null || true
+done
+
 echo "==> launching"
 adb logcat -c
-adb shell am start -n "${PACKAGE_NAME}/.MainActivity"
+
+# ANTMEDIA_TEST_SERVER turns on the live publish check. Without it the app runs the offline checks
+# only and logs that it skipped the live one, so a run with no server can never be mistaken for a
+# run that proved streaming works.
+if [ -n "${ANTMEDIA_TEST_SERVER:-}" ]; then
+    echo "==> live publish against ${ANTMEDIA_TEST_SERVER}"
+    adb shell am start -n "${PACKAGE_NAME}/.MainActivity" -e serverUrl "${ANTMEDIA_TEST_SERVER}"
+else
+    adb shell am start -n "${PACKAGE_NAME}/.MainActivity"
+fi
 
 echo "==> waiting for results"
 for _ in $(seq 1 "${POLL_ATTEMPTS}"); do

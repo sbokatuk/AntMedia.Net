@@ -124,13 +124,19 @@ for project in "${PLATFORM_PROJECTS[@]}"; do
 done
 
 if [ "${PACK_METAPACKAGE}" = true ]; then
-    # Packed last, and only after the platform packages have been merged into artifacts/. It
-    # declares a pinned dependency on each of them, so NuGet resolves them at restore time and
-    # would reject a package that carried only one band's target frameworks.
+    # Order matters, and each step depends on the previous one's output being in artifacts/:
+    #
+    #   AntMedia.Net       pinned dependency on both platform bindings
+    #   AntMedia.Net.Maui  pinned dependency on AntMedia.Net
+    #
+    # They are PackageReferences rather than ProjectReferences so the packed dependency graph is
+    # exactly what a consumer restores - which means each has to be packed before the next one
+    # can restore. NuGet would otherwise resolve a stale copy, or the last published release.
     #
     # With scope 'apple' the Android package must be placed in artifacts/ by the caller; CI
     # downloads it from the pack-android job.
     pack_and_merge "${ROOT}/src/AntMedia.Net/AntMedia.Net.csproj"
+    pack_and_merge "${ROOT}/src/AntMedia.Net.Maui/AntMedia.Net.Maui.csproj"
 fi
 
 echo "==> packages in ${OUTPUT}:"

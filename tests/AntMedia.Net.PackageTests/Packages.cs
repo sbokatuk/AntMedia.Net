@@ -11,6 +11,7 @@ public static class Packages
     public const string Android = "AntMedia.Net.Android";
     public const string IOS = "AntMedia.Net.iOS";
     public const string Meta = "AntMedia.Net";
+    public const string Maui = "AntMedia.Net.Maui";
 
     /// <summary>
     /// Target frameworks the Android package must carry, one per SDK band pass. These are pinned

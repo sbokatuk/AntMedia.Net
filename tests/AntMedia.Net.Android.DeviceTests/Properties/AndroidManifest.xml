@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+	<application android:label="AntMedia.Net device tests" />
+
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+	<!--
+	  Required by the live publish check. Without them the SDK refuses to start - it logs
+	  "Camera permissions not granted. Cannot init." and then never raises a callback at all, so
+	  the failure reaches the test only as a publish timeout. Declaring them is not enough on
+	  Android 6+; run-android-device-tests.sh grants them with `pm grant` after installing,
+	  because there is nobody to tap a dialog on a CI emulator.
+	-->
+	<uses-permission android:name="android.permission.CAMERA" />
+	<uses-permission android:name="android.permission.RECORD_AUDIO" />
+	<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+	<uses-feature android:name="android.hardware.camera" android:required="false" />
+	<uses-feature android:name="android.hardware.microphone" android:required="false" />
+</manifest>

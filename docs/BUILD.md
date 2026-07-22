@@ -19,11 +19,12 @@ native/
   android/overlay/           files copied over the upstream checkout before building
   ios/fetch-ios.sh           builds WebRTCiOSSDK.xcframework with our @objc facade
   ios/Facade/                the @objc facade compiled into the iOS framework
-  ios/add-facade.rb          adds the facade to the upstream Xcode target
+  ios/add-facade.py          adds the facade to the upstream Xcode target
   build/                     upstream checkouts and intermediates (git-ignored)
-src/                         the binding projects and the metapackage
+src/                         the binding projects, the cross-platform client and the MAUI package
 tests/                       package validation + on-device smoke tests
 samples/                     the MAUI sample app
+assets/                      the package icon
 AntMedia.Net.sln             every project above
 ```
 
@@ -98,7 +99,10 @@ Two details are load-bearing and easy to undo by accident:
   them as `NativeReference` in the consuming project from
   [`build/AntMedia.Net.iOS.targets`](../src/AntMedia.Net.iOS/build/AntMedia.Net.iOS.targets).
 
-Requires macOS with Xcode and the `xcodeproj` Ruby gem (installed by the script if missing).
+Requires macOS with Xcode. Nothing else is installed: the one fiddly part, adding the facade to
+the upstream Xcode target, is done by [`add-facade.py`](../native/ios/add-facade.py) using `plutil`
+and Python's `plistlib` rather than Ruby's `xcodeproj` gem — `project.pbxproj` is a property list,
+and Xcode reads it back happily in XML form.
 
 ```sh
 ./native/ios/fetch-ios.sh                      # the pinned commit
@@ -136,9 +140,26 @@ dotnet test tests/AntMedia.Net.PackageTests                       # asserts the 
 ./.github/scripts/run-ios-device-tests.sh <version>               # boots its own simulator
 ```
 
-The device tests are offline smoke tests: they prove the native library loads and the bound API is
-callable, not that streaming works. Verifying a real publish/play round-trip needs a running Ant
-Media Server and is out of scope for CI.
+The device tests are mostly offline: they prove the native libraries load and the bound API is
+callable. One check is not — the Android app also publishes to a real Ant Media Server when one is
+supplied, and CI runs the community edition as a service container for it:
+
+```bash
+ANTMEDIA_TEST_SERVER="ws://10.0.2.2:5080/LiveApp/websocket" \
+  ./.github/scripts/run-android-device-tests.sh <version>
+```
+
+Two things about that url are easy to get wrong. `10.0.2.2` is how an Android emulator reaches the
+host; and the application is **`LiveApp`**, not `WebRTCAppEE` — the latter is the Enterprise
+edition's name and 404s on the community image, which shows up as a publish timeout and an empty
+server log rather than as anything pointing at the url.
+
+This check earns its keep. It is what caught the SDK's undeclared gson dependency: the package
+restored, built and installed cleanly, then threw `NoClassDefFoundError` on the first publish.
+Nothing that stops short of streaming to a server would have found it.
+
+There is no iOS equivalent in CI, because GitHub's macOS runners have no Docker and so nowhere to
+run a server beside the simulator.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:
@@ -169,6 +190,79 @@ machine's global `xcode-select`, scope it to the one command:
 DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer ./.github/scripts/run-ios-device-tests.sh <version>
 ```
 
+## Running the live publish test locally
+
+This is the check worth reproducing by hand, because it is the one that finds runtime problems —
+a missing transitive dependency, a signalling mistake — that everything else misses.
+
+**1. Start a server.** Ant Media publish the community edition to Docker Hub; see their
+[Docker installation guide][ams-docker] for the image's own options.
+
+```bash
+docker run -d --name ams -p 5080:5080 antmedia/community:latest
+
+# The container is up well before the application inside it is listening.
+until curl -sf -o /dev/null http://localhost:5080/; do sleep 5; done
+```
+
+**2. Know which application you are talking to.** The community edition serves **`LiveApp`**;
+`WebRTCAppEE` is the Enterprise edition's application and returns 404 here. Getting this wrong
+looks like a publish timeout with nothing at all in the server log. Check what your server has:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5080/LiveApp/     # 200 on community
+```
+
+Ant Media's [WebRTC publishing guide][ams-publish] uses `WebRTCAppEE` throughout, because it is
+written for the Enterprise edition — worth remembering when following their samples.
+
+**3. Start an emulator with a camera.** Without one the SDK has no frames to encode and the server
+never sees a broadcast start:
+
+```bash
+emulator -avd <your-avd> -no-window -no-snapshot -noaudio -no-boot-anim -camera-back emulated &
+adb wait-for-device
+```
+
+**4. Run it.** `10.0.2.2` is the emulator's route to your host — see Android's
+[emulator networking documentation][emulator-networking]:
+
+```bash
+./build/BuildNugets.sh 1.0.0-local.1                       # pack what you want to test
+ANTMEDIA_TEST_SERVER="ws://10.0.2.2:5080/LiveApp/websocket" \
+  ./.github/scripts/run-android-device-tests.sh 1.0.0-local.1 net9.0-android35.0
+```
+
+A pass looks like this, and the last line is the contract the runner script checks:
+
+```
+PASS live publish
+ANTMEDIA_E2E_DONE PASS (5 checks)
+```
+
+**5. Confirm from the server, not only from the app.** The app asserting success is one half; the
+server having accepted the broadcast is the other:
+
+```bash
+docker logs ams 2>&1 | grep -E 'offer|onAddStream|onCreate Success'
+```
+
+```
+received sdp type is offer e2e073746
+onAddStream for stream: e2e073746
+onCreate Success for stream: e2e073746
+```
+
+**6. Clean up.** `docker rm -f ams`.
+
+Without `ANTMEDIA_TEST_SERVER` the app runs the offline checks only and logs
+`SKIP live publish (no serverUrl extra)`, leaving the check count unchanged — so a run with no
+server cannot be mistaken for one that proved streaming works.
+
+On Apple Silicon the community image runs under emulation, which is slower to start but works.
+There is no macOS equivalent of this for the iOS side in CI, because GitHub's macOS runners have
+no Docker; run it locally against a simulator if you need that coverage.
+
 ## CI
 
 | Workflow | Trigger | What it does |
@@ -195,3 +289,7 @@ on nuget.org; one will not cover the other.
 [android-sdk]: https://github.com/ant-media/WebRTC-Android-SDK
 [ios-sdk]: https://github.com/ant-media/WebRTC-iOS-SDK
 [trusted-publishing]: https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
+
+[ams-docker]: https://antmedia.io/docs/guides/installing-on-premise/installing-ant-media-server-on-docker/
+[ams-publish]: https://antmedia.io/docs/guides/publish-live-stream/webrtc-publishing/
+[emulator-networking]: https://developer.android.com/studio/run/emulator-networking

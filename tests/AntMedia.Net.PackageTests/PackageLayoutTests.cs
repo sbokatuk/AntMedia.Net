@@ -85,27 +85,54 @@ public class PackageLayoutTests
         Assert.Contains("WebRTC.xcframework", content);
     }
 
-    [SkippableFact]
-    public void Metapackage_ships_no_assemblies()
+    public static IEnumerable<object[]> CrossPlatformPackagesAndFrameworks =>
+        from packageId in new[] { Packages.Meta, Packages.Maui }
+        from tfm in Packages.AndroidTargetFrameworks.Concat(Packages.IosTargetFrameworks)
+        select new object[] { packageId, tfm };
+
+    [SkippableTheory]
+    [MemberData(nameof(CrossPlatformPackagesAndFrameworks))]
+    public void Cross_platform_packages_carry_an_assembly_for_every_target_framework(
+        string packageId, string tfm)
     {
-        Skip.IfNot(Packages.Exists(Packages.Meta), "the metapackage is only built on macOS");
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        using var package = Packages.OpenPackage(Packages.Meta);
+        using var package = Packages.OpenPackage(packageId);
 
-        var libEntries = package.Entries
-            .Where(e => e.FullName.StartsWith("lib/", StringComparison.Ordinal) && e.Length > 0)
-            .Select(e => e.FullName)
-            .ToList();
-
+        // These span both platforms, so unlike the bindings they must be present for all six
+        // target frameworks — a consumer multi-targeting Android and iOS resolves the same
+        // package on both legs.
+        var expected = $"lib/{tfm}/{packageId}.dll";
         Assert.True(
-            libEntries.Count == 0,
-            $"{Packages.Meta} is a dependency-only package but ships: {string.Join(", ", libEntries)}");
+            package.GetEntry(expected) is not null,
+            $"{packageId} is missing '{expected}'. It carries the cross-platform API, so every " +
+            "target framework needs an assembly, not just a dependency group.");
+    }
+
+    [Theory]
+    [MemberData(nameof(Packages.AndroidFrameworks), MemberType = typeof(Packages))]
+    public void Android_package_ships_documentation_for_the_bound_api(string tfm)
+    {
+        using var package = Packages.OpenPackage(Packages.Android);
+
+        using var xml = Packages.ReadEntry(package, $"lib/{tfm}/AntMedia.Net.Android.xml");
+        var document = System.Xml.Linq.XDocument.Load(xml);
+        var members = document.Descendants("member").Count();
+
+        // The docs come from the SDK's own javadoc, via the sources jar that
+        // native/android/fetch-android.sh builds. That jar is referenced conditionally so a
+        // checkout without it still compiles — which means losing it would silently ship a
+        // package documenting only the generated Resource class, as this one used to.
+        Assert.True(
+            members > 100,
+            $"{Packages.Android} ({tfm}) documents only {members} members. The javadoc sources " +
+            "jar was probably not built — see native/android/fetch-android.sh.");
     }
 
     [Fact]
     public void Packages_declare_the_expected_nuspec_metadata()
     {
-        foreach (var id in new[] { Packages.Android, Packages.IOS, Packages.Meta })
+        foreach (var id in new[] { Packages.Android, Packages.IOS, Packages.Meta, Packages.Maui })
         {
             if (!Packages.Exists(id))
             {

@@ -410,6 +410,7 @@ native/build/
 
 # Native payloads dropped into the binding projects by the fetch scripts.
 src/AntMedia.Net.Android/Jars/*.aar
+src/AntMedia.Net.Android/Jars/*.jar
 src/AntMedia.Net.iOS/lib/
 
 # Device test output

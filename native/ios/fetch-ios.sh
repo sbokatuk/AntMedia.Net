@@ -17,7 +17,8 @@ set -euo pipefail
 # and it has to be compiled *into* the framework to appear in the generated -Swift.h, hence this
 # rebuild.
 #
-# Requires: macOS with Xcode, git, and ruby with the xcodeproj gem (installed here if missing).
+# Requires: macOS with Xcode, git and python3 - all either preinstalled or already needed by the
+# build. Nothing is installed by this script.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/../../build/pins.sh"
@@ -58,19 +59,7 @@ FACADE_DIR="${CHECKOUT}/WebRTCiOSSDK/AntMediaNet"
 mkdir -p "${FACADE_DIR}"
 cp "${SCRIPT_DIR}"/Facade/*.swift "${FACADE_DIR}/"
 
-# Installed into a working-directory gem home rather than the system one: macOS ships a root-owned
-# /Library/Ruby/Gems that a plain `gem install` cannot write to, and requiring sudo here would make
-# the script unrunnable in CI and unpleasant locally. GEM_HOME is honoured both by `gem install`
-# and by ruby's own gem resolution, so add-facade.rb below finds it.
-export GEM_HOME="${WORK_DIR}/gems"
-export PATH="${GEM_HOME}/bin:${PATH}"
-
-if ! gem list -i xcodeproj >/dev/null 2>&1; then
-    echo "==> installing the xcodeproj gem into ${GEM_HOME}"
-    gem install --no-document --install-dir "${GEM_HOME}" xcodeproj
-fi
-
-ruby "${SCRIPT_DIR}/add-facade.rb" "${PROJECT}" "${TARGET}" "${FACADE_DIR}"/*.swift
+python3 "${SCRIPT_DIR}/add-facade.py" "${PROJECT}" "${TARGET}" "${FACADE_DIR}"/*.swift
 
 DERIVED_DATA="${WORK_DIR}/DerivedData"
 DEVICE_ARCHIVE="${WORK_DIR}/device.xcarchive"
@@ -92,7 +81,7 @@ archive() {
         CODE_SIGN_IDENTITY="" \
         CODE_SIGNING_REQUIRED=NO \
         CODE_SIGNING_ALLOWED=NO \
-        | (grep -E '(error|warning: .*facade|BUILD)' || true)
+        | (grep -E '(error:|BUILD (SUCCEEDED|FAILED))' || true)
 }
 
 # SKIP_INSTALL=NO puts the framework in the archive rather than only in DerivedData;

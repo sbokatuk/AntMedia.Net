@@ -54,6 +54,13 @@
       last released package instead of the one under test.
     -->
     <PackageReference Include="AntMedia.Net.Android" Version="[$(AntMediaPackageVersion)]" />
+
+    <!--
+      The cross-platform API, for the live check. That one talks to a real server through
+      PublishAsync, so it covers the whole stack a consumer actually uses rather than the binding
+      alone; the offline checks stay on the binding directly.
+    -->
+    <PackageReference Include="AntMedia.Net" Version="[$(AntMediaPackageVersion)]" />
   </ItemGroup>
 
   <Target Name="ValidateAntMediaPackageVersion" BeforeTargets="Restore;Build"

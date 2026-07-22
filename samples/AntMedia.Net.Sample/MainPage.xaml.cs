@@ -1,12 +1,17 @@
 using System.Text;
-using AntMedia.Net.Sample.Streaming;
+using AntMedia.Net.Maui;
 
 namespace AntMedia.Net.Sample;
 
+/// <summary>
+/// Publishes and plays a stream. The whole app is this one file — there is no per-platform code,
+/// because <c>AntMedia.Net</c> presents the same client on Android and iOS and
+/// <c>AntMedia.Net.Maui</c> supplies the video view and the Android <c>Activity</c>.
+/// </summary>
 public partial class MainPage : ContentPage
 {
     private readonly StringBuilder _status = new();
-    private IStreamingSession? _session;
+    private IAntMediaClient? _client;
 
     public MainPage()
     {
@@ -14,29 +19,36 @@ public partial class MainPage : ContentPage
     }
 
     /// <summary>
-    /// The session is created here rather than in the constructor because it needs the native
-    /// views behind the two VideoSurfaces, and those do not exist until the page has a handler.
+    /// Built lazily rather than in the constructor: on Android the SDK needs the current activity,
+    /// and the video views need their handlers, neither of which exists until the page is on screen.
     /// </summary>
-    private IStreamingSession Session()
+    private IAntMediaClient Client()
     {
-        if (_session is not null)
+        if (_client is not null)
         {
-            return _session;
+            return _client;
         }
 
-#if ANDROID
-        var activity = Platform.CurrentActivity
-            ?? throw new InvalidOperationException("no current activity");
-        _session = new StreamingSession(activity, LocalSurface, RemoteSurface);
-#elif IOS
-        _session = new StreamingSession(LocalSurface, RemoteSurface);
-#else
-        throw new PlatformNotSupportedException(
-            "AntMedia.Net supports Android and iOS; see docs/BUILD.md for why not Mac Catalyst.");
-#endif
+        var client = new AntMediaOptions
+        {
+            ServerUrl = ServerUrlEntry.Text?.Trim() ?? string.Empty,
+            VideoWidth = 640,
+            VideoHeight = 480,
+        }.CreateClient();
 
-        _session.Status += (_, message) => Append(message);
-        return _session;
+        client.SetLocalView(LocalView);
+        client.SetRemoteView(RemoteView);
+
+        // The SDKs raise callbacks on their own threads, so anything touching the UI hops back.
+        client.PublishStarted += (_, e) => Append($"publish started: {e.StreamId}");
+        client.PublishFinished += (_, e) => Append($"publish finished: {e.StreamId}");
+        client.PlayStarted += (_, e) => Append($"play started: {e.StreamId}");
+        client.PlayFinished += (_, e) => Append($"play finished: {e.StreamId}");
+        client.Disconnected += (_, e) => Append($"disconnected: {e.StreamId}");
+        client.Error += (_, e) => Append($"error: {e.Message}");
+        client.TrackAdded += (_, e) => Append($"track added: {e.Kind} {e.TrackId}");
+
+        return _client = client;
     }
 
     private async void OnPublishClicked(object sender, EventArgs e) =>
@@ -47,10 +59,9 @@ public partial class MainPage : ContentPage
 
     private async Task StartAsync(bool publish)
     {
-        var serverUrl = ServerUrlEntry.Text?.Trim();
         var streamId = StreamIdEntry.Text?.Trim();
 
-        if (string.IsNullOrEmpty(serverUrl) || string.IsNullOrEmpty(streamId))
+        if (string.IsNullOrEmpty(ServerUrlEntry.Text?.Trim()) || string.IsNullOrEmpty(streamId))
         {
             Append("enter a server url and a stream id first");
             return;
@@ -63,30 +74,41 @@ public partial class MainPage : ContentPage
             return;
         }
 
+        SetBusy(true);
+
         try
         {
-            var session = Session();
+            var client = Client();
 
+            // Completes when the server confirms, so there is no callback to wire up for the
+            // common case, and a failure to start surfaces as an exception right here.
             if (publish)
             {
-                session.Publish(serverUrl, streamId);
+                await client.PublishAsync(streamId);
             }
             else
             {
-                session.Play(serverUrl, streamId);
+                await client.PlayAsync(streamId);
             }
 
+            Append(publish ? $"publishing {streamId}" : $"playing {streamId}");
             SetStreaming(true);
         }
-        catch (Exception exception)
+        catch (AntMediaException exception)
         {
             Append($"failed to start: {exception.Message}");
+            SetStreaming(false);
+        }
+        finally
+        {
+            SetBusy(false);
         }
     }
 
     private void OnStopClicked(object sender, EventArgs e)
     {
-        _session?.Stop();
+        _client?.Stop();
+        Append("stopped");
         SetStreaming(false);
     }
 
@@ -98,6 +120,12 @@ public partial class MainPage : ContentPage
         return camera == PermissionStatus.Granted && microphone == PermissionStatus.Granted;
     }
 
+    private void SetBusy(bool busy)
+    {
+        PublishButton.IsEnabled = !busy;
+        PlayButton.IsEnabled = !busy;
+    }
+
     private void SetStreaming(bool streaming)
     {
         PublishButton.IsEnabled = !streaming;
@@ -105,23 +133,23 @@ public partial class MainPage : ContentPage
         StopButton.IsEnabled = streaming;
     }
 
-    private void Append(string message)
+    private void Append(string message) => MainThread.BeginInvokeOnMainThread(() =>
     {
         _status.AppendLine($"{DateTime.Now:HH:mm:ss}  {message}");
         StatusLabel.Text = _status.ToString();
         StatusScroll.ScrollToAsync(0, StatusLabel.Height, animated: false);
-    }
+    });
 
     protected override void OnHandlerChanged()
     {
         base.OnHandlerChanged();
 
-        // Releases the native renderers when the page goes away; both SDKs hold an EGL/GL context
-        // that is not reclaimed by managed collection alone.
+        // Releases the camera and the native renderers when the page goes away; both SDKs hold a
+        // GL context that managed collection alone does not reclaim.
         if (Handler is null)
         {
-            _session?.Dispose();
-            _session = null;
+            _client?.Dispose();
+            _client = null;
         }
     }
 }

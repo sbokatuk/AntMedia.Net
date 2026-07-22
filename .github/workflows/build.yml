@@ -176,18 +176,23 @@ jobs:
             9.0.x
             10.0.x
 
-      - name: Install iOS and Android workloads for every SDK band
+      - name: Install iOS, Android and MAUI workloads for every SDK band
         run: |
-          # The metapackage targets both platforms' TFMs, so this runner needs both workloads even
-          # though it only packs the Apple side of the binding.
+          # This runner needs all four:
+          #   ios, android   AntMedia.Net targets both platforms' TFMs, so restoring it needs both
+          #                  even though only the Apple binding is packed here
+          #   maui-*         AntMedia.Net.Maui is packed in the same run and its UseMauiCore build
+          #                  fails with NETSDK1147 without them
+          # Installed before packing rather than before the sample build, which is where they used
+          # to be: by then Pack has already failed.
           for major in 9 10; do
             dir="${RUNNER_TEMP}/sdk${major}"
             mkdir -p "${dir}"
             sdk=$(dotnet --list-sdks | grep "^${major}\." | tail -1 | cut -d' ' -f1)
-            echo "installing ios+android workloads for SDK ${sdk}"
+            echo "installing ios+android+maui workloads for SDK ${sdk}"
             ( cd "${dir}" \
               && dotnet new globaljson --sdk-version "${sdk}" --force \
-              && dotnet workload install ios android )
+              && dotnet workload install ios android maui-android maui-ios )
           done
 
       - name: Set up Android SDK platforms
@@ -235,9 +240,7 @@ jobs:
           # Debug, and iOS pinned to a simulator runtime identifier: an iOS Release build trims and
           # AOT-compiles, which with the ~27 MB WebRTC framework took 38 minutes of macOS runner
           # time for no added signal. Debug still restores, resolves and links, which is what this
-          # check is for.
-          dotnet workload install maui-android maui-ios
-
+          # check is for. The MAUI workloads are already installed - see the workload step.
           echo "::group::sample net9.0-android35.0"
           dotnet build samples/AntMedia.Net.Sample \
             -c Debug -f net9.0-android35.0 \
@@ -366,6 +369,110 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: android-device-test-logs
+          path: device-tests-logcat.txt
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-android-live:
+    name: live publish against an Ant Media Server
+    needs: [pack-android, validate]
+    runs-on: ubuntu-latest
+    # Informational rather than blocking. Everything it depends on is outside this repository - a
+    # Docker Hub pull, a server booting, and a full WebRTC handshake - so a failure here is as
+    # likely to be the environment as the code, and gating releases on it would mean releases
+    # blocked by someone else's outage. Look at it when it goes red; do not ignore it.
+    continue-on-error: true
+    services:
+      # Community edition, which is free and enough for a publish round-trip. Its version lags the
+      # SDK line the bindings track, which is fine: the signalling protocol is what is under test.
+      antmedia:
+        image: antmedia/community:latest
+        ports:
+          - 5080:5080
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Android workload
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install android )
+          dotnet workload install android
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 platforms;android-36'
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Wait for the server
+        run: |
+          # The container is up long before the application inside it is listening, so this waits
+          # on the port rather than on docker reporting the service started.
+          for _ in $(seq 1 60); do
+            if curl -sf -o /dev/null http://localhost:5080/; then
+              echo "Ant Media Server is up"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::the Ant Media Server container never started listening on 5080"
+          docker logs "$(docker ps -q --filter ancestor=antmedia/community:latest)" | tail -50
+          exit 1
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Publish a stream from the emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: false
+          # -camera-back emulated gives the publisher actual frames to encode; without a camera the
+          # SDK has nothing to send and the server never sees a broadcast start.
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
+          disable-animations: true
+          # 10.0.2.2 is the emulator's route to the runner host, where the service container's
+          # port 5080 is published.
+          # One line, no continuation: the action hands each line to `sh -c` separately, so a
+          # trailing backslash is run as a command of its own and the step dies with
+          # "/usr/bin/sh: 1: \: not found" and exit 127.
+          #
+          # LiveApp, not WebRTCAppEE: that is the Enterprise edition's application name and it 404s
+          # on the community image, which produces a publish timeout and an empty server log
+          # rather than anything that points at the URL.
+          script: ANTMEDIA_TEST_SERVER="ws://10.0.2.2:5080/LiveApp/websocket" ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
+
+      - name: Upload device logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-live-test-logs
           path: device-tests-logcat.txt
           if-no-files-found: ignore
           retention-days: 7

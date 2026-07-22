@@ -1,12 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Metapackage. Carries no code of its own: for each target framework it depends on the platform
-    binding that serves it, so an app that multi-targets Android and iOS references one package
-    and gets the right binding on each leg.
+    The cross-platform API. Was a dependency-only metapackage; it now carries the layer that makes
+    the two bindings look the same, because otherwise every consumer writes that adapter by hand -
+    the sample's earlier version was ~250 lines of it.
 
-    Both platforms' target frameworks are listed together here, which is why this project can only
-    be packed on macOS (restoring the iOS legs needs the iOS workload) — see build/BuildNugets.sh.
+    Deliberately no MAUI dependency, so plain .NET for Android and .NET for iOS apps can use this.
+    The MAUI view and the Android Activity plumbing live in AntMedia.Net.Maui.
+
+    Both platforms' target frameworks are listed together, which is why this can only be packed on
+    macOS - restoring the iOS legs needs the iOS workload. See build/BuildNugets.sh.
   -->
   <PropertyGroup>
     <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks)</TargetFrameworks>
@@ -14,45 +17,43 @@
     <AssemblyName>AntMedia.Net</AssemblyName>
     <RootNamespace>AntMedia.Net</RootNamespace>
     <LangVersion>latest</LangVersion>
-    <Nullable>disable</Nullable>
-
-    <!--
-      No assembly is produced or packed: the package is nothing but its dependencies. Suppressing
-      NU5128 is required because NuGet otherwise objects to a lib-less package that declares
-      dependency groups.
-    -->
-    <IncludeBuildOutput>false</IncludeBuildOutput>
-    <IncludeSymbols>false</IncludeSymbols>
-    <SuppressDependenciesWhenPacking>false</SuppressDependenciesWhenPacking>
-    <NoWarn>$(NoWarn);NU5128</NoWarn>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
-  <!--
-    Version-locked to the platform packages built from the same commit: a metapackage that floated
-    could pair a new facade with an old binding.
-  -->
   <PropertyGroup>
     <AntMediaDependencyVersion Condition=" '$(AntMediaDependencyVersion)' == '' ">$(Version)</AntMediaDependencyVersion>
   </PropertyGroup>
 
+  <!--
+    Platform code is picked per target framework rather than by the default glob, which would try
+    to compile the Android half into the iOS assembly.
+  -->
+  <ItemGroup>
+    <Compile Remove="Platforms/**/*.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <Compile Include="Platforms/Android/**/*.cs" />
     <PackageReference Include="AntMedia.Net.Android" Version="[$(AntMediaDependencyVersion)]" />
   </ItemGroup>
 
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <Compile Include="Platforms/iOS/**/*.cs" />
     <PackageReference Include="AntMedia.Net.iOS" Version="[$(AntMediaDependencyVersion)]" />
   </ItemGroup>
 
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>AntMedia.Net</PackageId>
-    <Title>.NET MAUI bindings for the Ant Media WebRTC SDKs.</Title>
-    <Description>.NET MAUI / .NET for Android and iOS bindings for the Ant Media WebRTC SDKs. References AntMedia.Net.Android and AntMedia.Net.iOS so a multi-targeted app needs only this one package. Lets a .NET app publish and play WebRTC streams through an Ant Media Server.</Description>
+    <Title>Cross-platform .NET client for the Ant Media WebRTC SDKs.</Title>
+    <Description>One API over the Ant Media WebRTC SDKs for Android and iOS: publish and play streams with awaitable calls and ordinary .NET events, instead of writing a per-platform adapter over a Java listener interface and an Objective-C delegate. Pulls in the platform binding that matches whichever target framework you build. For .NET MAUI apps, add AntMedia.Net.Maui for the video view.</Description>
     <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;Android;iOS;Binding</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="../../Nugets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
   </ItemGroup>
 
