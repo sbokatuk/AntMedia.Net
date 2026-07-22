@@ -106,8 +106,11 @@ jobs:
           # A curated docs/release-notes/<version>.md replaces the generated commit list when one
           # exists. The second lookup drops the prerelease suffix, so v2.17.2-beta.2 reuses the
           # notes written for 2.17.2 rather than silently falling back to raw commit subjects.
+          # The third drops a fourth component, which belongs to this repository rather than to
+          # the SDK, so 2.17.2.1 reuses the notes filed as 2.17.2.md.
           notes="docs/release-notes/${VERSION}.md"
           [ -f "${notes}" ] || notes="docs/release-notes/${VERSION%%-*}.md"
+          [ -f "${notes}" ] || notes="docs/release-notes/$(printf '%s' "${VERSION%%-*}" | cut -d. -f1-3).md"
 
           {
             if [ -f "${notes}" ]; then
