@@ -178,13 +178,19 @@ DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer ./.github/script
 | [`release.yml`](../.github/workflows/release.yml) | `v*` tags | Publishes the tagged version and creates the GitHub release |
 
 `build.yml` splits packing across runners: Android needs only a JDK and the Android SDK so it
-packs on `ubuntu-latest`, while iOS needs Xcode and packs on `macos-latest`. The two package sets
-are merged by the `validate` job, which runs the package tests over the complete set.
+packs on `ubuntu-latest`, while iOS needs Xcode and packs on `macos-15` — pinned, not
+`macos-latest`, so an image roll cannot change which Xcode versions `select-xcode.sh` can pick
+from. The two package sets are merged by the `validate` job, which runs the package tests over the
+complete set.
 
 Publishing uses nuget.org [trusted publishing][trusted-publishing]: the job requests a GitHub OIDC
 token and exchanges it for a short-lived API key, so there is no long-lived key in the repository
-secrets. It needs `id-token: write`, a `production` environment matching the nuget.org policy, and
-a `NUGET_USER` secret holding the nuget.org account name.
+secrets. It needs `id-token: write`, a `NUGET_USER` secret holding the nuget.org account name, and
+an `environment:` whose name matches the one recorded on the nuget.org policy — both workflows use
+`nuget.org`. A mismatch fails the exchange with HTTP 401 and `Environment mismatch for policy`.
+
+Policies are scoped to a single workflow file, so `pr.yml` and `release.yml` each need their own
+on nuget.org; one will not cover the other.
 
 [android-sdk]: https://github.com/ant-media/WebRTC-Android-SDK
 [ios-sdk]: https://github.com/ant-media/WebRTC-iOS-SDK
