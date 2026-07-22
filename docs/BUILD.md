@@ -136,9 +136,26 @@ dotnet test tests/AntMedia.Net.PackageTests                       # asserts the 
 ./.github/scripts/run-ios-device-tests.sh <version>               # boots its own simulator
 ```
 
-The device tests are offline smoke tests: they prove the native library loads and the bound API is
-callable, not that streaming works. Verifying a real publish/play round-trip needs a running Ant
-Media Server and is out of scope for CI.
+The device tests are mostly offline: they prove the native libraries load and the bound API is
+callable. One check is not — the Android app also publishes to a real Ant Media Server when one is
+supplied, and CI runs the community edition as a service container for it:
+
+```bash
+ANTMEDIA_TEST_SERVER="ws://10.0.2.2:5080/LiveApp/websocket" \
+  ./.github/scripts/run-android-device-tests.sh <version>
+```
+
+Two things about that url are easy to get wrong. `10.0.2.2` is how an Android emulator reaches the
+host; and the application is **`LiveApp`**, not `WebRTCAppEE` — the latter is the Enterprise
+edition's name and 404s on the community image, which shows up as a publish timeout and an empty
+server log rather than as anything pointing at the url.
+
+This check earns its keep. It is what caught the SDK's undeclared gson dependency: the package
+restored, built and installed cleanly, then threw `NoClassDefFoundError` on the first publish.
+Nothing that stops short of streaming to a server would have found it.
+
+There is no iOS equivalent in CI, because GitHub's macOS runners have no Docker and so nowhere to
+run a server beside the simulator.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:

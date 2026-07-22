@@ -69,6 +69,28 @@
   </ItemGroup>
 
   <!--
+    gson is a runtime dependency of the SDK, declared in its build.gradle as
+    `implementation 'com.google.code.gson:gson'` and therefore *not* bundled in the .aar. Without
+    it a consumer restores and builds and installs perfectly happily, then dies the first time it
+    publishes:
+
+        Java.Lang.NoClassDefFoundError: Failed resolution of: Lcom/google/gson/GsonBuilder;
+
+    Nothing short of an on-device publish catches this, which is what the live e2e is for.
+
+    The version is per target framework because the Xamarin.Google bindings are packed per SDK
+    band, exactly as this repository's own packages are: no single GoogleGson version carries
+    assets for net8, net9 and net10 together.
+  -->
+  <ItemGroup Condition=" '$(TargetFramework)' == 'net8.0-android34.0' ">
+    <PackageReference Include="GoogleGson" Version="2.13.0.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition=" '$(TargetFramework)' != 'net8.0-android34.0' ">
+    <PackageReference Include="GoogleGson" Version="2.13.2.2" />
+  </ItemGroup>
+
+  <!--
     The Java package maps to IO.Antmedia.Webrtcandroidframework by default, which is a mouthful and
     reads nothing like the package a consumer installed. Renamed to AntMedia.WebRTC, sub-namespaces
     following along (…​.Api -> AntMedia.WebRTC.Api, and so on).

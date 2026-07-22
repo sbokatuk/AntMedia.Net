@@ -43,31 +43,63 @@ public sealed partial class AntMediaClient
     /// <summary>Renders the stream being played into <paramref name="renderer" />.</summary>
     public void SetRemoteRenderer(SurfaceViewRenderer? renderer) => _remoteRenderer = renderer;
 
-    private void PublishCore(string streamId, string mainTrackId)
+    /// <summary>
+    /// Runs once the websocket is up, which is what the operation is really waiting for.
+    /// </summary>
+    private Action? _whenConnected;
+
+    private void PublishCore(string streamId, string mainTrackId) =>
+        WhenConnected(publishing: true, streamId, client =>
+        {
+            if (string.IsNullOrEmpty(mainTrackId))
+            {
+                client.Publish(streamId);
+            }
+            else
+            {
+                // The long overload is the only one that takes a main track, so the other
+                // arguments are spelled out at their defaults.
+                client.Publish(
+                    streamId,
+                    _options.Token,
+                    _options.VideoEnabled,
+                    _options.AudioEnabled,
+                    string.Empty,
+                    string.Empty,
+                    string.Empty,
+                    mainTrackId);
+            }
+        });
+
+    private void PlayCore(string streamId) =>
+        WhenConnected(publishing: false, streamId, client => client.Play(streamId));
+
+    /// <summary>
+    /// Opens the websocket first and only then publishes or plays.
+    ///
+    /// Calling publish() straight after building sends the publish command *twice* against
+    /// SDK 2.17.2: isWebSocketConnected() reports true as soon as connect() has been called
+    /// rather than when the socket opens, so publish() sends immediately, and the SDK sends it
+    /// again from its own onWebSocketConnected handler. The server answers both, two peer
+    /// connections are created, and the second offer dies with
+    ///
+    ///     Failed to set local offer sdp: The order of m-lines in subsequent offer doesn't match
+    ///
+    /// Init() opens the socket without requesting a stream, so by the time publish() runs there
+    /// is nothing queued for the connect handler to re-send.
+    /// </summary>
+    private void WhenConnected(bool publishing, string streamId, Action<NativeClient> start)
     {
-        var client = Build(publishing: true, streamId);
+        var client = Build(publishing, streamId);
 
-        if (string.IsNullOrEmpty(mainTrackId))
+        _whenConnected = () =>
         {
-            client.Publish(streamId);
-        }
-        else
-        {
-            // The long overload is the only one that takes a main track, so the other arguments
-            // are spelled out at their defaults.
-            client.Publish(
-                streamId,
-                _options.Token,
-                _options.VideoEnabled,
-                _options.AudioEnabled,
-                string.Empty,
-                string.Empty,
-                string.Empty,
-                mainTrackId);
-        }
+            _whenConnected = null;
+            start(client);
+        };
+
+        client.Init();
     }
-
-    private void PlayCore(string streamId) => Build(publishing: false, streamId).Play(streamId);
 
     private NativeClient Build(bool publishing, string streamId)
     {
@@ -152,6 +184,13 @@ public sealed partial class AntMediaClient
     /// </summary>
     private sealed class ListenerBridge(AntMediaClient owner) : DefaultWebRTCListener
     {
+        public override void OnWebSocketConnected()
+        {
+            // Deferred until now rather than issued straight after Build() — see WhenConnected.
+            var pending = owner._whenConnected;
+            pending?.Invoke();
+        }
+
         public override void OnPublishStarted(string streamId)
         {
             owner.CompletePending();

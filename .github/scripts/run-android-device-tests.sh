@@ -80,6 +80,16 @@ else
     adb install -r "${APK}"
 fi
 
+# Granted rather than prompted for: there is nobody to tap a dialog on a CI emulator, and without
+# them the SDK declines to publish, logs "Camera permissions not granted" and then raises no
+# callback at all - so the live check would fail as an unexplained timeout.
+# Ignored failures: a device below Android 6 has them granted at install time and `pm grant`
+# errors, which is not a problem worth failing the run over.
+echo "==> granting camera and microphone"
+for permission in android.permission.CAMERA android.permission.RECORD_AUDIO android.permission.MODIFY_AUDIO_SETTINGS; do
+    adb shell pm grant "${PACKAGE_NAME}" "${permission}" 2>/dev/null || true
+done
+
 echo "==> launching"
 adb logcat -c
 
