@@ -176,18 +176,23 @@ jobs:
             9.0.x
             10.0.x
 
-      - name: Install iOS and Android workloads for every SDK band
+      - name: Install iOS, Android and MAUI workloads for every SDK band
         run: |
-          # The metapackage targets both platforms' TFMs, so this runner needs both workloads even
-          # though it only packs the Apple side of the binding.
+          # This runner needs all four:
+          #   ios, android   AntMedia.Net targets both platforms' TFMs, so restoring it needs both
+          #                  even though only the Apple binding is packed here
+          #   maui-*         AntMedia.Net.Maui is packed in the same run and its UseMauiCore build
+          #                  fails with NETSDK1147 without them
+          # Installed before packing rather than before the sample build, which is where they used
+          # to be: by then Pack has already failed.
           for major in 9 10; do
             dir="${RUNNER_TEMP}/sdk${major}"
             mkdir -p "${dir}"
             sdk=$(dotnet --list-sdks | grep "^${major}\." | tail -1 | cut -d' ' -f1)
-            echo "installing ios+android workloads for SDK ${sdk}"
+            echo "installing ios+android+maui workloads for SDK ${sdk}"
             ( cd "${dir}" \
               && dotnet new globaljson --sdk-version "${sdk}" --force \
-              && dotnet workload install ios android )
+              && dotnet workload install ios android maui-android maui-ios )
           done
 
       - name: Set up Android SDK platforms
@@ -235,9 +240,7 @@ jobs:
           # Debug, and iOS pinned to a simulator runtime identifier: an iOS Release build trims and
           # AOT-compiles, which with the ~27 MB WebRTC framework took 38 minutes of macOS runner
           # time for no added signal. Debug still restores, resolves and links, which is what this
-          # check is for.
-          dotnet workload install maui-android maui-ios
-
+          # check is for. The MAUI workloads are already installed - see the workload step.
           echo "::group::sample net9.0-android35.0"
           dotnet build samples/AntMedia.Net.Sample \
             -c Debug -f net9.0-android35.0 \
