@@ -11,7 +11,10 @@ set -euo pipefail
 # emulator-runner action, and simctl gives a cleaner handle on the app's stdout than mlaunch does.
 
 VERSION="${1:?a package version is required}"
-TARGET_FRAMEWORK="${2:-net10.0-ios26.0}"
+# Unpinned platform version on purpose: net10.0-ios26.0 selects the Microsoft.iOS.Sdk pack for
+# iOS 26.0, which refuses to build on a machine with a different Xcode. The bare TFM takes
+# whichever pack matches the installed Xcode, and still consumes the package's pinned assets.
+TARGET_FRAMEWORK="${2:-net10.0-ios}"
 
 BUNDLE_ID="com.sbokatuk.antmedia.devicetests"
 LOG_FILE="device-tests-simulator.log"
@@ -50,15 +53,23 @@ printf '{ "sdk": { "version": "%s", "rollForward": "latestFeature" } }\n' "${sdk
 # See the Android runner: NuGet would otherwise serve a cached copy of a version we just re-packed.
 rm -rf "${HOME}/.nuget/packages/antmedia.net.ios/${VERSION}"
 
+# Debug, not Release. An iOS Release build trims and AOT-compiles, which for an app carrying the
+# ~27 MB WebRTC framework takes the better part of an hour on a CI runner — and buys nothing here,
+# since this app is never shipped and the binding's trimming behaviour is not what the smoke test
+# is checking. Debug still links the native frameworks, which is the part that matters.
+#
+# Held in a variable because it appears twice: the build and the path the .app is looked up under.
+CONFIGURATION="Debug"
+
 echo "==> building device tests (version=${VERSION}, tfm=${TARGET_FRAMEWORK}, rid=${DEVICE_RID})"
 ( cd "${SDK_DIR}" && dotnet build "${PROJECT}" \
-    --configuration Release \
+    --configuration "${CONFIGURATION}" \
     -f "${TARGET_FRAMEWORK}" \
     -p:AntMediaPackageVersion="${VERSION}" \
     -p:AntMediaDeviceTargetFramework="${TARGET_FRAMEWORK}" \
     -p:RuntimeIdentifier="${DEVICE_RID}" )
 
-APP="$(find "$(dirname "${PROJECT}")/bin/Release/${TARGET_FRAMEWORK}/${DEVICE_RID}" \
+APP="$(find "$(dirname "${PROJECT}")/bin/${CONFIGURATION}/${TARGET_FRAMEWORK}/${DEVICE_RID}" \
     -maxdepth 1 -name '*.app' -type d | head -1)"
 if [ -z "${APP}" ]; then
     echo "::error::build succeeded but no .app bundle was produced" >&2

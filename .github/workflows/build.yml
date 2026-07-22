@@ -33,9 +33,15 @@ on:
         default: net10.0-android36.0
         type: string
       e2e-ios-target-framework:
-        description: Target framework the iOS simulator smoke test runs against.
+        description: >
+          Target framework the iOS simulator smoke test runs against. Deliberately unpinned
+          (net10.0-ios, not net10.0-ios26.0): a pinned platform version selects that exact
+          Microsoft.iOS.Sdk pack, which refuses to build unless the runner has the matching Xcode
+          — net10.0-ios26.0 demands Xcode 26.0 while the image ships 26.5. The packages still pin
+          their platform versions; only this throwaway app floats, and an app built against a
+          newer iOS SDK consumes the package's net10.0-ios26.0 assets fine.
         required: false
-        default: net10.0-ios26.0
+        default: net10.0-ios
         type: string
 
 env:
@@ -223,15 +229,25 @@ jobs:
           # Proves the metapackage is actually consumable: it restores, resolves to the right
           # platform binding per target framework, and the iOS half links — which is where a
           # dynamic xcframework that was embedded instead of shipped as content fails.
+          #
+          # Debug, and iOS pinned to a simulator runtime identifier: an iOS Release build trims and
+          # AOT-compiles, which with the ~27 MB WebRTC framework took 38 minutes of macOS runner
+          # time for no added signal. Debug still restores, resolves and links, which is what this
+          # check is for.
           dotnet workload install maui-android maui-ios
-          for tfm in net9.0-android35.0 net9.0-ios18.0; do
-            echo "::group::sample ${tfm}"
-            dotnet build samples/AntMedia.Net.Sample \
-              -c Release \
-              -f "${tfm}" \
-              -p:AntMediaPackageVersion="${{ inputs.version }}"
-            echo "::endgroup::"
-          done
+
+          echo "::group::sample net9.0-android35.0"
+          dotnet build samples/AntMedia.Net.Sample \
+            -c Debug -f net9.0-android35.0 \
+            -p:AntMediaPackageVersion="${{ inputs.version }}"
+          echo "::endgroup::"
+
+          echo "::group::sample net9.0-ios18.0"
+          dotnet build samples/AntMedia.Net.Sample \
+            -c Debug -f net9.0-ios18.0 \
+            -p:RuntimeIdentifier=iossimulator-arm64 \
+            -p:AntMediaPackageVersion="${{ inputs.version }}"
+          echo "::endgroup::"
 
   validate:
     name: validate packages

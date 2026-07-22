@@ -140,6 +140,19 @@ The device tests are offline smoke tests: they prove the native library loads an
 callable, not that streaming works. Verifying a real publish/play round-trip needs a running Ant
 Media Server and is out of scope for CI.
 
+Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
+cost you an hour of CI time or a confusing failure:
+
+- **The smoke app's target framework is unpinned** (`net10.0-ios`, not `net10.0-ios26.0`). A pinned
+  platform version selects that exact `Microsoft.iOS.Sdk` pack, which then refuses to build unless
+  the machine has the matching Xcode — `net10.0-ios26.0` demands Xcode 26.0 while the GitHub image
+  ships 26.5. The *packages* still pin their platform versions, which is correct: an app built
+  against a newer iOS SDK consumes `lib/net10.0-ios26.0` happily. Only the throwaway app floats.
+- **The smoke app and the sample are built Debug.** An iOS Release build trims and AOT-compiles;
+  with the ~27 MB WebRTC framework in the app that took 38 minutes of macOS runner time in one
+  observed run. Nothing is lost — these apps are never shipped, and trimming behaviour is not what
+  either check is testing. Debug still restores, resolves and links the native frameworks.
+
 ## CI
 
 | Workflow | Trigger | What it does |

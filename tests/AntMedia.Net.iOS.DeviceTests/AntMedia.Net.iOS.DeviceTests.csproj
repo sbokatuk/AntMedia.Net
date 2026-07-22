@@ -8,14 +8,28 @@
     identifier, installs it with simctl and reads the verdict from the app's stdout.
   -->
   <PropertyGroup>
-    <!-- Set by the runner script; the default is the newest band so a bare build is meaningful. -->
-    <AntMediaDeviceTargetFramework Condition=" '$(AntMediaDeviceTargetFramework)' == '' ">net10.0-ios26.0</AntMediaDeviceTargetFramework>
+    <!--
+      Set by the runner script; the default is the newest band so a bare build is meaningful.
+      The platform version is deliberately left off: pinning it (net10.0-ios26.0) selects that
+      exact Microsoft.iOS.Sdk pack, which then refuses to build unless the machine has the exact
+      matching Xcode. This app is throwaway, so it floats to whatever the installed Xcode supports
+      and consumes the package's pinned net10.0-ios26.0 assets, which a newer platform version can.
+    -->
+    <AntMediaDeviceTargetFramework Condition=" '$(AntMediaDeviceTargetFramework)' == '' ">net10.0-ios</AntMediaDeviceTargetFramework>
     <TargetFramework>$(AntMediaDeviceTargetFramework)</TargetFramework>
 
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
+
+    <!--
+      CS8765: UIApplicationDelegate.FinishedLaunching's launchOptions parameter is annotated
+      differently across the iOS SDK bands this app is built for, so the override warns on some of
+      them. Suppressed rather than worked around: the alternatives are to change which launch
+      callback the app uses, which would alter startup behaviour purely to silence a warning.
+    -->
+    <NoWarn>$(NoWarn);CS8765</NoWarn>
 
     <ApplicationId>com.sbokatuk.antmedia.devicetests</ApplicationId>
     <ApplicationVersion>1</ApplicationVersion>
