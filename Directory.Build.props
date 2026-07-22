@@ -45,6 +45,17 @@
     <AntMediaIosRepository>https://github.com/ant-media/WebRTC-iOS-SDK</AntMediaIosRepository>
     <AntMediaIosCommit>47e2b0201959f56f26096a00edd7277d2cb87449</AntMediaIosCommit>
     <AntMediaIosCommitDate>2025-11-14</AntMediaIosCommitDate>
+
+    <!--
+      The Mac Catalyst build compiles the *same* Ant Media commit, but against a stock libwebrtc
+      rather than Ant Media's own. It has to: their build is a fork - it adds RTCAudioDeviceModule -
+      published for iOS only, with no source, so no Catalyst slice can be produced from it. This
+      one ships maccatalyst. See native/mac/fetch-mac.sh and the shim beside it.
+
+      iOS and Android are untouched by this and keep using Ant Media's own libraries.
+    -->
+    <AntMediaMacWebRtcRelease>150.0.0</AntMediaMacWebRtcRelease>
+    <AntMediaMacWebRtcUrl>https://github.com/stasel/WebRTC/releases/download/$(AntMediaMacWebRtcRelease)/WebRTC-M150.xcframework.zip</AntMediaMacWebRtcUrl>
   </PropertyGroup>
 
   <!--

@@ -418,3 +418,6 @@ device-tests-logcat.txt
 device-tests-simulator.log
 
 .DS_Store
+
+# Mac Catalyst native payload, produced by native/mac/fetch-mac.sh
+src/AntMedia.Net.Mac/lib/
