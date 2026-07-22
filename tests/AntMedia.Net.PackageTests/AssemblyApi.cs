@@ -39,6 +39,19 @@ public sealed class AssemblyApi : IDisposable
             .ToList();
     }
 
+    /// <summary>
+    /// Every type this assembly references from elsewhere, by simple name.
+    ///
+    /// Used to prove which platform an assembly was actually compiled for: a handler bound to
+    /// <c>SurfaceViewRenderer</c> and one bound to <c>UIView</c> have identical type names and
+    /// members, and differ only in what they reference.
+    /// </summary>
+    public IReadOnlyList<string> ReferencedTypes => _metadata.TypeReferences
+        .Select(_metadata.GetTypeReference)
+        .Select(reference => _metadata.GetString(reference.Name))
+        .Distinct()
+        .ToList();
+
     public IReadOnlyList<string> PropertiesOf(string typeFullName)
     {
         var type = FindType(typeFullName);
