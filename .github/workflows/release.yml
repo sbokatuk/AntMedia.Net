@@ -136,16 +136,20 @@ jobs:
             echo "## Packages"
             echo
             echo "Bound against the Ant Media Android SDK \`${ANTMEDIA_ANDROID_TAG}\` and iOS SDK"
-            echo "\`${ANTMEDIA_IOS_COMMIT}\`, targeting .NET 8, .NET 9 and .NET 10."
+            echo "\`${ANTMEDIA_IOS_COMMIT}\`, the latter also built for Mac Catalyst against"
+            echo "libwebrtc \`${ANTMEDIA_MAC_WEBRTC_RELEASE}\`. Targeting .NET 8, .NET 9 and .NET 10."
             echo
             echo "| Package | Platforms | NuGet |"
             echo "| --- | --- | --- |"
-            echo "| \`AntMedia.Net\` | Android, iOS | [${VERSION}](https://www.nuget.org/packages/AntMedia.Net/${VERSION}) |"
+            echo "| \`AntMedia.Net.Maui\` | Android, iOS, Mac Catalyst | [${VERSION}](https://www.nuget.org/packages/AntMedia.Net.Maui/${VERSION}) |"
+            echo "| \`AntMedia.Net\` | Android, iOS, Mac Catalyst | [${VERSION}](https://www.nuget.org/packages/AntMedia.Net/${VERSION}) |"
             echo "| \`AntMedia.Net.Android\` | Android | [${VERSION}](https://www.nuget.org/packages/AntMedia.Net.Android/${VERSION}) |"
             echo "| \`AntMedia.Net.iOS\` | iOS | [${VERSION}](https://www.nuget.org/packages/AntMedia.Net.iOS/${VERSION}) |"
+            echo "| \`AntMedia.Net.Mac\` | Mac Catalyst (Apple Silicon) | [${VERSION}](https://www.nuget.org/packages/AntMedia.Net.Mac/${VERSION}) |"
             echo
             echo "\`\`\`"
-            echo "dotnet add package AntMedia.Net --version ${VERSION}"
+            echo "dotnet add package AntMedia.Net.Maui --version ${VERSION}   # MAUI apps"
+            echo "dotnet add package AntMedia.Net --version ${VERSION}        # everything else"
             echo "\`\`\`"
           } > release-notes.md
 

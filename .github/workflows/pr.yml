@@ -85,7 +85,7 @@ jobs:
           {
             echo "### Published \`${{ needs.version.outputs.version }}\` to nuget.org"
             echo
-            for id in AntMedia.Net AntMedia.Net.Android AntMedia.Net.iOS; do
+            for id in AntMedia.Net.Maui AntMedia.Net AntMedia.Net.Android AntMedia.Net.iOS AntMedia.Net.Mac; do
               echo "- [${id}](https://www.nuget.org/packages/${id}/${{ needs.version.outputs.version }})"
             done
           } >> "$GITHUB_STEP_SUMMARY"
