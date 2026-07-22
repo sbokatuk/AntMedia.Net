@@ -20,6 +20,11 @@ native/
   ios/fetch-ios.sh           builds WebRTCiOSSDK.xcframework with our @objc facade
   ios/Facade/                the @objc facade compiled into the iOS framework
   ios/add-facade.py          adds the facade to the upstream Xcode target
+  mac/fetch-mac.sh           builds the same, for Mac Catalyst, on a stock libwebrtc
+  mac/Shim/                  the fork-only API Ant Media's Swift calls, over stock libwebrtc
+  mac/enable-catalyst.py     turns on Mac Catalyst in the upstream Xcode target
+  mac/strip-slices.py        keeps the arm64 Catalyst slice and drops the rest
+  mac/flatten-frameworks.py  versioned framework layout -> shallow, so NuGet can carry it
   build/                     upstream checkouts and intermediates (git-ignored)
 src/                         the binding projects, the cross-platform client and the MAUI package
 tests/                       package validation + on-device smoke tests
@@ -28,7 +33,7 @@ assets/                      the package icon
 AntMedia.Net.sln             every project above
 ```
 
-The solution spans .NET 8/9/10 and both platforms, so no single SDK can build all of it at once —
+The solution spans .NET 8/9/10 and three platforms, so no single SDK can build all of it at once —
 `dotnet build AntMedia.Net.sln` will fail on whichever band the current SDK does not own. Build
 individual projects, or use `build/BuildNugets.sh`, which handles the bands.
 
@@ -92,12 +97,18 @@ Two details are load-bearing and easy to undo by accident:
   class as `_OBJC_CLASS_$__TtC12WebRTCiOSSDK9AMSClient` while the .NET binding links against
   `_OBJC_CLASS_$_AMSClient`, and every consuming app fails at link time. `fetch-ios.sh` checks the
   exported symbols with `nm` and fails the build if the mangled form comes back.
-- **Both xcframeworks are dynamic, so they ship as package content, not inside the assembly.**
+- **Both xcframeworks are dynamic, so they travel beside the assembly rather than inside it.**
   A dynamic framework embedded in a binding assembly never reaches the consuming app's linker,
-  which fails with `"_OBJC_CLASS_$_AMSClient", referenced from: <initial-undefines>`. The package
-  therefore sets `NoBindingEmbedding=true`, ships the frameworks under `native/`, and declares
-  them as `NativeReference` in the consuming project from
-  [`build/AntMedia.Net.iOS.targets`](../src/AntMedia.Net.iOS/build/AntMedia.Net.iOS.targets).
+  which fails with `"_OBJC_CLASS_$_AMSClient", referenced from: <initial-undefines>`. The binding
+  projects therefore set `NoBindingEmbedding=true` and keep their `NativeReference` items, which
+  packs the frameworks as `<assembly>.resources[.zip]` next to each target framework's assembly;
+  the Apple SDK unpacks and links them in whichever app references the package.
+
+  A package-level `build/<id>.targets` that re-declared them in the consuming project would be
+  four times smaller, since it needs one copy rather than one per target framework. It does not
+  work: NuGet's default `PrivateAssets` hides `build` assets from *transitive* consumers, so an
+  app that arrives here through `AntMedia.Net.Maui` → `AntMedia.Net` never imports it, and fails
+  with exactly the error above.
 
 Requires macOS with Xcode. Nothing else is installed: the one fiddly part, adding the facade to
 the upstream Xcode target, is done by [`add-facade.py`](../native/ios/add-facade.py) using `plutil`
@@ -173,11 +184,16 @@ the sample app resolve the packages that were just built rather than whatever is
 dotnet test tests/AntMedia.Net.PackageTests                       # asserts the packed .nupkg shape
 ./.github/scripts/run-android-device-tests.sh <version>           # needs a booted emulator
 ./.github/scripts/run-ios-device-tests.sh <version>               # boots its own simulator
+./.github/scripts/run-mac-device-tests.sh <version>               # runs on this Mac (arm64)
 ```
 
+The Mac Catalyst app shares the iOS one's sources — the two bindings come from one ApiDefinition,
+so the checks are the same checks — and its runner is the simplest of the three, because a Catalyst
+app *is* a macOS app: nothing to boot, nothing to install.
+
 The device tests are mostly offline: they prove the native libraries load and the bound API is
-callable. One check is not — the Android app also publishes to a real Ant Media Server when one is
-supplied, and CI runs the community edition as a service container for it:
+callable. One check is not — every one of the three apps also publishes to a real Ant Media Server
+when one is supplied, and CI runs the community edition as a service container for Android:
 
 ```bash
 ANTMEDIA_TEST_SERVER="ws://10.0.2.2:5080/LiveApp/websocket" \
@@ -193,8 +209,11 @@ This check earns its keep. It is what caught the SDK's undeclared gson dependenc
 restored, built and installed cleanly, then threw `NoClassDefFoundError` on the first publish.
 Nothing that stops short of streaming to a server would have found it.
 
-There is no iOS equivalent in CI, because GitHub's macOS runners have no Docker and so nowhere to
-run a server beside the simulator.
+There is no Apple equivalent in CI. GitHub's macOS runners have no Docker, so there is nowhere to
+run a server beside them; beyond that an iOS simulator has no camera to publish from, and the
+Catalyst runner has no camera and nobody to answer the permission prompt. Both Apple runners honour
+`ANTMEDIA_TEST_SERVER` and run the live check when it is set, so the coverage is available locally
+— see below.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:
@@ -290,27 +309,55 @@ onCreate Success for stream: e2e073746
 
 **6. Clean up.** `docker rm -f ams`.
 
+### The same, on Mac Catalyst
+
+```bash
+ANTMEDIA_TEST_SERVER="ws://localhost:5080/LiveApp/websocket" \
+  ./.github/scripts/run-mac-device-tests.sh 1.0.0-local.1 net9.0-maccatalyst18.0
+```
+
+Three things differ from the Android run, and each one fails in a way that does not name itself:
+
+- **The app must be launched through LaunchServices**, which is why the runner uses `open` rather
+  than exec'ing the binary. macOS only shows the camera and microphone prompts for an app it
+  launched; a binary started from a shell inherits the terminal's grants instead. Answer the prompt
+  the first time — until you do, the app sits waiting for it.
+- **The check asks for permission before it publishes**, deliberately. Without that, an unauthorised
+  capture device produces no frames, every signalling step succeeds, and ten seconds later the
+  server reports `WebRTC ingest is not started. So publish timeout is firing` — which reads like a
+  networking or codec fault.
+- **The server has to be reachable at an address it can advertise.** A default `docker run`
+  publishes its ICE candidate as the container's own `172.17.0.2`, which is unroutable from macOS,
+  so signalling and ICE complete and no media ever flows. Publish the media ports
+  (`-p 50000-50020:50000-50020/udp`) and run the server somewhere its address is real to the
+  client — Docker Desktop's host networking, a VM, or a remote instance. Ant Media's
+  `settings.replaceCandidateAddrWithServerAddr` is the knob for this, but it lives in the server's
+  database, not `red5-web.properties`: editing the file is overwritten on the next start, so set it
+  from the web panel or the REST API.
+
+The iOS simulator has no camera or microphone, so the live check cannot run there at all; leave
+`ANTMEDIA_TEST_SERVER` unset and it reports `SKIP`.
+
 Without `ANTMEDIA_TEST_SERVER` the app runs the offline checks only and logs
 `SKIP live publish (no serverUrl extra)`, leaving the check count unchanged — so a run with no
 server cannot be mistaken for one that proved streaming works.
 
 On Apple Silicon the community image runs under emulation, which is slower to start but works.
-There is no macOS equivalent of this for the iOS side in CI, because GitHub's macOS runners have
-no Docker; run it locally against a simulator if you need that coverage.
 
 ## CI
 
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
-| [`build.yml`](../.github/workflows/build.yml) | called by the other two | Builds natives, packs, validates, runs both smoke tests |
+| [`build.yml`](../.github/workflows/build.yml) | called by the other two | Builds natives, packs, validates, runs all three smoke tests |
 | [`pr.yml`](../.github/workflows/pr.yml) | pull requests | Builds `<version>-beta.<pr>.<run>` and publishes it |
 | [`release.yml`](../.github/workflows/release.yml) | `v*` tags | Publishes the tagged version and creates the GitHub release |
 
 `build.yml` splits packing across runners: Android needs only a JDK and the Android SDK so it
-packs on `ubuntu-latest`, while iOS needs Xcode and packs on `macos-15` — pinned, not
+packs on `ubuntu-latest`, while the Apple packages need Xcode and pack on `macos-15` — pinned, not
 `macos-latest`, so an image roll cannot change which Xcode versions `select-xcode.sh` can pick
 from. The two package sets are merged by the `validate` job, which runs the package tests over the
-complete set.
+complete set. The `e2e-mac` job needs an arm64 runner, since `AntMedia.Net.Mac` ships an arm64
+Catalyst slice only.
 
 Publishing uses nuget.org [trusted publishing][trusted-publishing]: the job requests a GitHub OIDC
 token and exchanges it for a short-lived API key, so there is no long-lived key in the repository

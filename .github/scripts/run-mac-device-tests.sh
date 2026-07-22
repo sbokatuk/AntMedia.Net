@@ -13,7 +13,9 @@ set -euo pipefail
 VERSION="${1:?a package version is required}"
 TARGET_FRAMEWORK="${2:-net10.0-maccatalyst26.0}"
 
-LOG_FILE="device-tests-maccatalyst.log"
+# Absolute, because `open` resolves --stdout and --stderr relative to its own working directory
+# rather than the caller's and fails the launch with a bare "-10810" if it cannot.
+LOG_FILE="${PWD}/device-tests-maccatalyst.log"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PROJECT="${REPO_ROOT}/tests/AntMedia.Net.Mac.DeviceTests/AntMedia.Net.Mac.DeviceTests.csproj"
