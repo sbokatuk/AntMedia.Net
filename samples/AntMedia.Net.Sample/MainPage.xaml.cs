@@ -99,6 +99,13 @@ public partial class MainPage : ContentPage
             Append($"failed to start: {exception.Message}");
             SetStreaming(false);
         }
+        catch (PlatformNotSupportedException exception)
+        {
+            // Mac Catalyst. The app runs and the UI works, but there is no Ant Media framework to
+            // stream with, so say so plainly rather than letting it crash.
+            Append(exception.Message);
+            SetStreaming(false);
+        }
         finally
         {
             SetBusy(false);

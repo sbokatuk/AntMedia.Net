@@ -28,6 +28,16 @@ public static class Packages
         "net8.0-ios18.0", "net9.0-ios18.0", "net10.0-ios26.0",
     ];
 
+    /// <summary>
+    /// Carried by the cross-platform packages only, and only so a MAUI app targeting Catalyst can
+    /// reference them — there is no Ant Media framework for Catalyst, so nothing streams there.
+    /// The bindings do not target it at all.
+    /// </summary>
+    public static readonly string[] MacCatalystTargetFrameworks =
+    [
+        "net8.0-maccatalyst18.0", "net9.0-maccatalyst18.0", "net10.0-maccatalyst26.0",
+    ];
+
     public static IEnumerable<object[]> AndroidFrameworks =>
         AndroidTargetFrameworks.Select(tfm => new object[] { tfm });
 

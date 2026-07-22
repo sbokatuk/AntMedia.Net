@@ -55,7 +55,11 @@ upstream SDK is Swift and exposes almost nothing to Objective-C, so there is not
 binding to attach to; [`native/ios/Facade`](native/ios/Facade) re-exposes the client API and is
 compiled into the framework. See [docs/BUILD.md](docs/BUILD.md) for what that leaves out.
 
-**Mac Catalyst is not supported.** Neither of Ant Media's iOS xcframeworks ships a Catalyst slice.
+**Mac Catalyst builds but does not stream.** `AntMedia.Net` and `AntMedia.Net.Maui` target it so a
+MAUI app using the default template can reference them without the restore failing, and the UI
+runs — but creating a client throws `PlatformNotSupportedException`. Ant Media publishes its iOS
+WebRTC framework for iOS only, and it is a customised libwebrtc that stock Catalyst builds cannot
+stand in for. See [docs/BUILD.md](docs/BUILD.md).
 
 ## Building
 

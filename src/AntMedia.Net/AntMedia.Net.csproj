@@ -12,7 +12,7 @@
     macOS - restoring the iOS legs needs the iOS workload. See build/BuildNugets.sh.
   -->
   <PropertyGroup>
-    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks)</TargetFrameworks>
+    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks);$(AntMediaMacCatalystTargetFrameworks)</TargetFrameworks>
 
     <AssemblyName>AntMedia.Net</AssemblyName>
     <RootNamespace>AntMedia.Net</RootNamespace>
@@ -42,6 +42,15 @@
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
     <Compile Include="Platforms/iOS/**/*.cs" />
     <PackageReference Include="AntMedia.Net.iOS" Version="[$(AntMediaDependencyVersion)]" />
+  </ItemGroup>
+
+  <!--
+    No binding dependency for Mac Catalyst: there is no Ant Media framework for it, which is the
+    whole reason this leg only throws. Shipping the iOS binding here would drag a 28 MB pair of
+    iOS-only xcframeworks into an app that cannot use them.
+  -->
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
+    <Compile Include="Platforms/MacCatalyst/**/*.cs" />
   </ItemGroup>
 
   <PropertyGroup>

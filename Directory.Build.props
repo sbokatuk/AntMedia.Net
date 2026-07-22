@@ -72,6 +72,18 @@
 
     <AntMediaIosTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0-ios18.0;net9.0-ios18.0</AntMediaIosTargetFrameworks>
     <AntMediaIosTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-ios26.0</AntMediaIosTargetFrameworks>
+
+    <!--
+      Mac Catalyst is present so that a .NET MAUI app can *reference* these packages - the MAUI
+      template targets maccatalyst by default, and without assets for it NuGet fails the whole
+      restore with NU1202 and the developer has to edit TargetFrameworks before they can start.
+      It does not stream: see the Catalyst section in docs/BUILD.md. Constructing a client throws
+      PlatformNotSupportedException with that explanation.
+
+      Same band split as iOS, verified the same way.
+    -->
+    <AntMediaMacCatalystTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0-maccatalyst18.0;net9.0-maccatalyst18.0</AntMediaMacCatalystTargetFrameworks>
+    <AntMediaMacCatalystTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-maccatalyst26.0</AntMediaMacCatalystTargetFrameworks>
   </PropertyGroup>
 
   <!--

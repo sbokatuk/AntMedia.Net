@@ -87,7 +87,9 @@ public class PackageLayoutTests
 
     public static IEnumerable<object[]> CrossPlatformPackagesAndFrameworks =>
         from packageId in new[] { Packages.Meta, Packages.Maui }
-        from tfm in Packages.AndroidTargetFrameworks.Concat(Packages.IosTargetFrameworks)
+        from tfm in Packages.AndroidTargetFrameworks
+            .Concat(Packages.IosTargetFrameworks)
+            .Concat(Packages.MacCatalystTargetFrameworks)
         select new object[] { packageId, tfm };
 
     [SkippableTheory]

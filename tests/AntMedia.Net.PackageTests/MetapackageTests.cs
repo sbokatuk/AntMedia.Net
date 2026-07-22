@@ -10,9 +10,15 @@ namespace AntMedia.Net.PackageTests;
 /// </summary>
 public class MetapackageTests
 {
-    private static readonly Dictionary<string, string> ExpectedDependency =
-        Packages.AndroidTargetFrameworks.ToDictionary(tfm => tfm, _ => Packages.Android)
-            .Concat(Packages.IosTargetFrameworks.ToDictionary(tfm => tfm, _ => Packages.IOS))
+    /// <summary>
+    /// Which binding each target framework must pull in. Mac Catalyst maps to null on purpose:
+    /// the group exists so the package can be referenced there, but shipping the iOS binding with
+    /// it would drag 28 MB of iOS-only xcframeworks into an app that cannot use them.
+    /// </summary>
+    private static readonly Dictionary<string, string?> ExpectedDependency =
+        Packages.AndroidTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.Android)
+            .Concat(Packages.IosTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.IOS))
+            .Concat(Packages.MacCatalystTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)null))
             .ToDictionary(pair => pair.Key, pair => pair.Value);
 
     private static Dictionary<string, XElement> DependencyGroups()
@@ -55,6 +61,15 @@ public class MetapackageTests
                 .Where(e => e.Name.LocalName == "dependency")
                 .Select(e => e.Attribute("id")?.Value)
                 .ToList();
+
+            if (expectedId is null)
+            {
+                Assert.True(
+                    dependencies.Count == 0,
+                    $"{Packages.Meta} group '{tfm}' should carry no binding dependency but has " +
+                    $"[{string.Join(", ", dependencies)}].");
+                continue;
+            }
 
             // A group that lost its <dependency> children still restores cleanly and installs
             // nothing, which would look like the binding simply not working.

@@ -112,13 +112,31 @@ and Xcode reads it back happily in XML form.
 Both scripts are pin-keyed and idempotent, which is what makes the CI caches safe: the cache key
 is the pin plus a hash of the script inputs, so changing the facade rebuilds the framework.
 
-### Mac Catalyst is not supported
+### Mac Catalyst builds, but does not stream
 
-Neither `WebRTCiOSSDK.xcframework` nor `WebRTC.xcframework` has a Mac Catalyst slice — both carry
-`ios-arm64` and `ios-arm64_x86_64-simulator` only — and `Package.swift` declares `.iOS(.v12)`.
-Shipping Catalyst would mean rebuilding libwebrtc for the Catalyst destination, which is a
-separate project. The `Bindings/AntMedia.Net.Mac*` scaffolding predates this and is not built or
-published.
+`AntMedia.Net` and `AntMedia.Net.Maui` target Mac Catalyst; the bindings do not. The Catalyst
+assemblies compile and a MAUI app targeting Catalyst launches with a working UI, but constructing
+a client throws `PlatformNotSupportedException`.
+
+That exists for one reason: the MAUI project template targets `maccatalyst` by default, and a
+package with no assets for it fails the *entire* restore with `NU1202`. Without these targets,
+adopting AntMedia.Net starts with editing `TargetFrameworks`, and the error says nothing about why.
+
+Streaming is blocked upstream, not here — we build the Swift SDK ourselves now, so adding a
+Catalyst destination to that would be easy. The blocker is libwebrtc:
+
+- Ant Media links a **customised** libwebrtc. Their `WebRTC.framework` exports
+  `RTCAudioDeviceModule` and ships `RTCAudioDeviceModule.h`; stock builds have neither.
+- They publish it for **iOS only** — `ios-arm64` and `ios-arm64_x86_64-simulator` — and do not
+  publish the fork's source.
+- A Catalyst-capable community build exists ([stasel/WebRTC][stasel] M150 has
+  `ios-x86_64_arm64-maccatalyst`), but Ant Media's Swift code does not compile against it:
+  `cannot find type 'RTCAudioDeviceModule' in scope`, and
+  `peerConnectionFactory(encoderFactory:decoderFactory:audioDeviceModule:)` does not exist there.
+
+So real Catalyst support needs Ant Media to publish a Catalyst slice, or a fork of their Swift SDK
+moved off their custom audio-device API — which would also move it off whatever that API does for
+echo cancellation and device routing.
 
 ## Packing
 
@@ -289,6 +307,7 @@ on nuget.org; one will not cover the other.
 [android-sdk]: https://github.com/ant-media/WebRTC-Android-SDK
 [ios-sdk]: https://github.com/ant-media/WebRTC-iOS-SDK
 [trusted-publishing]: https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
+[stasel]: https://github.com/stasel/WebRTC
 
 [ams-docker]: https://antmedia.io/docs/guides/installing-on-premise/installing-ant-media-server-on-docker/
 [ams-publish]: https://antmedia.io/docs/guides/publish-live-stream/webrtc-publishing/

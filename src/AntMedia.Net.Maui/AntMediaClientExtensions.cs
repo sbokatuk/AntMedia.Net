@@ -31,9 +31,14 @@ public static class AntMediaClientExtensions
 #elif IOS
         return new AntMediaClient(options);
 #else
+        // Reached on Mac Catalyst. AntMediaClient's Catalyst half throws the same thing from its
+        // constructor; this is here so the failure is identical whichever way a client is created.
         throw new PlatformNotSupportedException(
-            "AntMedia.Net supports Android and iOS. Mac Catalyst is not supported because Ant " +
-            "Media publishes no Catalyst slice for its iOS SDK.");
+            "AntMedia.Net does not support Mac Catalyst. Ant Media publishes its iOS WebRTC " +
+            "framework for iOS only — there is no Mac Catalyst slice — so there is nothing to " +
+            "bind against on this platform. Android and iOS are supported. This package targets " +
+            "Mac Catalyst purely so that a multi-targeted MAUI app can reference it without the " +
+            "restore failing.");
 #endif
     }
 
@@ -53,7 +58,7 @@ public static class AntMediaClientExtensions
 
 #if ANDROID
         ((AntMediaClient)client).SetLocalRenderer(native);
-#elif IOS
+#elif IOS || MACCATALYST
         ((AntMediaClient)client).SetLocalView(native);
 #endif
     }
@@ -69,7 +74,7 @@ public static class AntMediaClientExtensions
 
 #if ANDROID
         ((AntMediaClient)client).SetRemoteRenderer(native);
-#elif IOS
+#elif IOS || MACCATALYST
         ((AntMediaClient)client).SetRemoteView(native);
 #endif
     }
@@ -77,7 +82,9 @@ public static class AntMediaClientExtensions
 #if ANDROID
     private static Org.Webrtc.SurfaceViewRenderer PlatformView(AntMediaVideoView view) =>
         view.Handler?.PlatformView as Org.Webrtc.SurfaceViewRenderer ?? throw NotRealised();
-#elif IOS
+#elif IOS || MACCATALYST
+    // UIKit is present on Mac Catalyst too, so the view resolves there and a page containing one
+    // lays out normally. Only the client refuses to start.
     private static UIKit.UIView PlatformView(AntMediaVideoView view) =>
         view.Handler?.PlatformView as UIKit.UIView ?? throw NotRealised();
 #else

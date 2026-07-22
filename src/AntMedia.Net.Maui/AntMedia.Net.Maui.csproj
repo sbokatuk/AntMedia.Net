@@ -10,7 +10,7 @@
     be a poor trade.
   -->
   <PropertyGroup>
-    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks)</TargetFrameworks>
+    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks);$(AntMediaMacCatalystTargetFrameworks)</TargetFrameworks>
 
     <AssemblyName>AntMedia.Net.Maui</AssemblyName>
     <RootNamespace>AntMedia.Net.Maui</RootNamespace>
@@ -32,19 +32,6 @@
   <PropertyGroup>
     <AntMediaDependencyVersion Condition=" '$(AntMediaDependencyVersion)' == '' ">$(Version)</AntMediaDependencyVersion>
   </PropertyGroup>
-
-  <!-- Platform code is selected per target framework rather than by the default glob. -->
-  <ItemGroup>
-    <Compile Remove="Platforms/**/*.cs" />
-  </ItemGroup>
-
-  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
-    <Compile Include="Platforms/Android/**/*.cs" />
-  </ItemGroup>
-
-  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-    <Compile Include="Platforms/iOS/**/*.cs" />
-  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
