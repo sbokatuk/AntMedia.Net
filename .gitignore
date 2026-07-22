@@ -415,3 +415,5 @@ src/AntMedia.Net.iOS/lib/
 # Device test output
 device-tests-logcat.txt
 device-tests-simulator.log
+
+.DS_Store
