@@ -145,7 +145,12 @@ cp -R "${WORK_DIR}/${SCHEME}.xcframework" "${DESTINATION}/"
 # facade, and rebuilding libwebrtc from source is a multi-hour job with no benefit here.
 cp -R "${CHECKOUT}/WebRTC.xcframework" "${DESTINATION}/"
 
-printf 'commit=%s\n' "$(git -C "${CHECKOUT}" rev-parse HEAD)" > "${WORK_DIR}/pin.txt"
+# The date as well as the sha: upstream publishes no version for this SDK, so "how old is this
+# pin" is a question only the commit date can answer.
+cat > "${WORK_DIR}/pin.txt" <<EOF
+commit=$(git -C "${CHECKOUT}" rev-parse HEAD)
+commit_date=$(git -C "${CHECKOUT}" show -s --format=%cs HEAD)
+EOF
 
 echo "==> staged in ${DESTINATION}:"
 du -sh "${DESTINATION}"/*.xcframework

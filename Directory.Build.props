@@ -9,7 +9,12 @@
     triggers a rebuild of the native layer.
   -->
   <PropertyGroup>
-    <!-- Package version base. Tracks the Ant Media SDK line these bindings bind. -->
+    <!--
+      Package version base. Tracks the Ant Media *Android* SDK's tag, because that is the only
+      side with a version to track: see AntMediaIosCommit below for why the iOS SDK has none.
+      Note that even on Android the tag is not self-consistent - v2.17.2 contains sources whose
+      build.gradle still declares PUBLISH_VERSION 2.17.1 - so the tag name is what this follows.
+    -->
     <AntMediaVersion>2.17.2</AntMediaVersion>
     <VersionPrefix>$(AntMediaVersion)</VersionPrefix>
 
@@ -21,12 +26,25 @@
     <AntMediaAndroidTag>v2.17.2</AntMediaAndroidTag>
 
     <!--
-      github.com/ant-media/WebRTC-iOS-SDK. Pinned to a commit rather than a tag: upstream has
-      tagged the iOS repository exactly once (v2.10.0), so a tag pin would strand us on a 2020
-      release. native/ios/fetch-ios.sh rebuilds the xcframework from this commit.
+      github.com/ant-media/WebRTC-iOS-SDK, pinned to a commit because upstream publishes no
+      version for this SDK at all. Checked, all of it:
+
+        tags                 only v2.10.0, from 2020
+        GitHub releases      none
+        CocoaPods            not published
+        Package.swift        no version; SPM would take it from a tag, and there is none usable
+        xcodeproj            MARKETING_VERSION = 1.0, never bumped
+        framework Info.plist CFBundleShortVersionString = 1.0, from the above
+        README               silent
+        docs.antmedia.io     versioned by Ant Media *Server* release, not by SDK
+
+      So a commit is the only precise identifier that exists. AntMediaIosCommitDate records what
+      the commit sha cannot convey - how current the pin is - and this one is the tip of master,
+      which has not moved since. Re-pin by taking master's head again and updating both.
     -->
     <AntMediaIosRepository>https://github.com/ant-media/WebRTC-iOS-SDK</AntMediaIosRepository>
     <AntMediaIosCommit>47e2b0201959f56f26096a00edd7277d2cb87449</AntMediaIosCommit>
+    <AntMediaIosCommitDate>2025-11-14</AntMediaIosCommitDate>
   </PropertyGroup>
 
   <!--
