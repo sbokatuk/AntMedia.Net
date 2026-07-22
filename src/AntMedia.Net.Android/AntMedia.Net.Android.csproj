@@ -58,6 +58,21 @@
     <TransformFile Include="Transforms/EnumMethods.xml" />
   </ItemGroup>
 
+  <!--
+    The Java package maps to IO.Antmedia.Webrtcandroidframework by default, which is a mouthful and
+    reads nothing like the package a consumer installed. Renamed to AntMedia.WebRTC, sub-namespaces
+    following along (…​.Api -> AntMedia.WebRTC.Api, and so on).
+
+    Org.Webrtc is deliberately left alone: it is the name the WebRTC project uses everywhere, so
+    anyone who has seen WebRTC code before will look for it, and every Android WebRTC sample on the
+    internet spells it that way.
+
+    This changes the public API, so it has to stay put once the packages have users.
+  -->
+  <ItemGroup>
+    <AndroidNamespaceReplacement Include="IO.Antmedia.Webrtcandroidframework" Replacement="AntMedia.WebRTC" />
+  </ItemGroup>
+
   <!-- Packaging -->
   <PropertyGroup>
     <IsPackable>true</IsPackable>

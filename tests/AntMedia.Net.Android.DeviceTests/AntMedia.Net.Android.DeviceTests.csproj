@@ -27,7 +27,19 @@
       The point of this app is to prove the *packaged* binding works, so it must not be trimmed
       down to whatever the test code statically touches, and the native libraries must all ship.
     -->
-    <PublishTrimmed>false</PublishTrimmed>
+    <!--
+      Trimming is the interesting variable here, so it is a switch rather than a fixed setting.
+      Default off: the app's job is to prove the *packaged* binding works, and a type stripped
+      because the test code never statically reaches it would be a false failure.
+      -p:AntMediaTrimming=full runs the same tests the way a consumer's Release build ships,
+      which is the only configuration that exercises the linker against the binding.
+    -->
+    <AntMediaTrimming Condition=" '$(AntMediaTrimming)' == '' ">none</AntMediaTrimming>
+    <PublishTrimmed Condition=" '$(AntMediaTrimming)' == 'none' ">false</PublishTrimmed>
+    <PublishTrimmed Condition=" '$(AntMediaTrimming)' != 'none' ">true</PublishTrimmed>
+    <TrimMode Condition=" '$(AntMediaTrimming)' == 'sdk' ">partial</TrimMode>
+    <TrimMode Condition=" '$(AntMediaTrimming)' == 'full' ">full</TrimMode>
+
     <!-- Release defaults to AOT, which the SDK only allows alongside trimming (XA1030). -->
     <RunAOTCompilation>false</RunAOTCompilation>
   </PropertyGroup>

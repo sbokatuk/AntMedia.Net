@@ -354,7 +354,12 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
+          # Run twice: once as the app ships by default, once fully trimmed. Trimming is the one
+          # configuration where a binding can pass every desktop check and still fail at runtime,
+          # because the linker strips types that only Java reflection reaches. ~30s per run.
+          script: |
+            ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
+            ANTMEDIA_TRIMMING=full ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
 
       - name: Upload device logs
         if: always()
@@ -400,6 +405,11 @@ jobs:
 
       - name: Run smoke tests on simulator
         run: ./.github/scripts/run-ios-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-ios-target-framework }}"
+
+      - name: Run smoke tests on simulator, fully trimmed
+        # The one configuration where a binding can pass every desktop check and still fail at
+        # runtime, because the linker strips types only the Objective-C runtime reaches. ~35s.
+        run: ANTMEDIA_TRIMMING=full ./.github/scripts/run-ios-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-ios-target-framework }}"
 
       - name: Upload simulator logs
         if: always()
