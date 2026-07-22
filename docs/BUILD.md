@@ -143,15 +143,31 @@ Media Server and is out of scope for CI.
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:
 
-- **The smoke app's target framework is unpinned** (`net10.0-ios`, not `net10.0-ios26.0`). A pinned
-  platform version selects that exact `Microsoft.iOS.Sdk` pack, which then refuses to build unless
-  the machine has the matching Xcode — `net10.0-ios26.0` demands Xcode 26.0 while the GitHub image
-  ships 26.5. The *packages* still pin their platform versions, which is correct: an app built
-  against a newer iOS SDK consumes `lib/net10.0-ios26.0` happily. Only the throwaway app floats.
+- **CI selects the Xcode that carries the iOS SDK the packages target**, via
+  [`select-xcode.sh`](../.github/scripts/select-xcode.sh), and the macOS jobs pin `macos-15`
+  rather than `macos-latest`. `net10.0-ios26.0` only builds against an Xcode carrying the iOS 26.0
+  SDK — with the image default (26.5) it fails outright:
+
+  ```
+  error : This version of .NET for iOS (26.0.11017) requires Xcode 26.0.
+          The current version of Xcode is 26.5.
+  ```
+
+  The smoke app is therefore built for one of the package's *own* target frameworks, so the test
+  proves what actually ships rather than something adjacent to it. The script resolves the Xcode
+  by glob (`Xcode_26.0*.app`) rather than a hard-coded path, because the images carry patch
+  releases — it is `26.0.1` today — and a hard-coded path goes stale silently when they re-roll.
 - **The smoke app and the sample are built Debug.** An iOS Release build trims and AOT-compiles;
   with the ~27 MB WebRTC framework in the app that took 38 minutes of macOS runner time in one
   observed run. Nothing is lost — these apps are never shipped, and trimming behaviour is not what
   either check is testing. Debug still restores, resolves and links the native frameworks.
+
+To run the iOS smoke test locally you may need the same Xcode selected. Rather than changing your
+machine's global `xcode-select`, scope it to the one command:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode_26.0.1.app/Contents/Developer ./.github/scripts/run-ios-device-tests.sh <version>
+```
 
 ## CI
 

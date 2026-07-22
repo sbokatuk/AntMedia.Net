@@ -34,14 +34,11 @@ on:
         type: string
       e2e-ios-target-framework:
         description: >
-          Target framework the iOS simulator smoke test runs against. Deliberately unpinned
-          (net10.0-ios, not net10.0-ios26.0): a pinned platform version selects that exact
-          Microsoft.iOS.Sdk pack, which refuses to build unless the runner has the matching Xcode
-          — net10.0-ios26.0 demands Xcode 26.0 while the image ships 26.5. The packages still pin
-          their platform versions; only this throwaway app floats, and an app built against a
-          newer iOS SDK consumes the package's net10.0-ios26.0 assets fine.
+          Which of the package's target frameworks the simulator smoke test runs against.
+          Defaults to net10, whose assets are produced by the merge step in BuildNugets.sh and so
+          are the ones worth proving at runtime.
         required: false
-        default: net10.0-ios
+        default: net10.0-ios26.0
         type: string
 
 env:
@@ -148,9 +145,14 @@ jobs:
     # AntMedia.Net.Android for the Android target frameworks, and NuGet has to resolve it at
     # restore time, so that package must already exist in artifacts/ on this runner.
     needs: [pins, pack-android]
-    runs-on: macos-latest
+    # Pinned rather than macos-latest so an image roll cannot change which Xcode versions are
+    # available to the selection step below.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: ./.github/scripts/select-xcode.sh
 
       - name: Download the Android package
         uses: actions/download-artifact@v4
@@ -366,9 +368,14 @@ jobs:
   e2e-ios:
     name: iOS simulator smoke test
     needs: [pack-apple, validate]
-    runs-on: macos-latest
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      # The smoke app is built for the package's own net10.0-ios26.0 target framework, which only
+      # builds against an Xcode carrying the iOS 26.0 SDK — see the script.
+      - name: Select Xcode
+        run: ./.github/scripts/select-xcode.sh
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v4

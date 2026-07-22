@@ -10,12 +10,11 @@
   <PropertyGroup>
     <!--
       Set by the runner script; the default is the newest band so a bare build is meaningful.
-      The platform version is deliberately left off: pinning it (net10.0-ios26.0) selects that
-      exact Microsoft.iOS.Sdk pack, which then refuses to build unless the machine has the exact
-      matching Xcode. This app is throwaway, so it floats to whatever the installed Xcode supports
-      and consumes the package's pinned net10.0-ios26.0 assets, which a newer platform version can.
+      Matches one of the package's own target frameworks on purpose, so the smoke test exercises
+      what ships. It only builds against an Xcode carrying the matching iOS SDK — CI selects one
+      with .github/scripts/select-xcode.sh.
     -->
-    <AntMediaDeviceTargetFramework Condition=" '$(AntMediaDeviceTargetFramework)' == '' ">net10.0-ios</AntMediaDeviceTargetFramework>
+    <AntMediaDeviceTargetFramework Condition=" '$(AntMediaDeviceTargetFramework)' == '' ">net10.0-ios26.0</AntMediaDeviceTargetFramework>
     <TargetFramework>$(AntMediaDeviceTargetFramework)</TargetFramework>
 
     <OutputType>Exe</OutputType>

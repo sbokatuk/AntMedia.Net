@@ -48,6 +48,13 @@
     <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
 
     <!--
+      Supplies ILoggingBuilder.AddDebug, which MauiProgram calls inside #if DEBUG. Referenced
+      unconditionally rather than only for Debug: a configuration-dependent PackageReference makes
+      restore differ between configurations, and this is how the MAUI template ships it.
+    -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="8.0.0" />
+
+    <!--
       The metapackage resolves to AntMedia.Net.Android or AntMedia.Net.iOS depending on which
       target framework is being built.
     -->

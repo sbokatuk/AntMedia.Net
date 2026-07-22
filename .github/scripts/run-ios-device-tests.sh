@@ -11,10 +11,10 @@ set -euo pipefail
 # emulator-runner action, and simctl gives a cleaner handle on the app's stdout than mlaunch does.
 
 VERSION="${1:?a package version is required}"
-# Unpinned platform version on purpose: net10.0-ios26.0 selects the Microsoft.iOS.Sdk pack for
-# iOS 26.0, which refuses to build on a machine with a different Xcode. The bare TFM takes
-# whichever pack matches the installed Xcode, and still consumes the package's pinned assets.
-TARGET_FRAMEWORK="${2:-net10.0-ios}"
+# One of the package's own target frameworks, so the smoke test proves what actually ships. It
+# only builds against an Xcode carrying the matching iOS SDK; CI selects it with
+# .github/scripts/select-xcode.sh, and locally you may need DEVELOPER_DIR set to the same.
+TARGET_FRAMEWORK="${2:-net10.0-ios26.0}"
 
 BUNDLE_ID="com.sbokatuk.antmedia.devicetests"
 LOG_FILE="device-tests-simulator.log"
