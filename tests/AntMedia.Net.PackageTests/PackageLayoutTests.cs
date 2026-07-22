@@ -85,27 +85,34 @@ public class PackageLayoutTests
         Assert.Contains("WebRTC.xcframework", content);
     }
 
-    [SkippableFact]
-    public void Metapackage_ships_no_assemblies()
+    public static IEnumerable<object[]> CrossPlatformPackagesAndFrameworks =>
+        from packageId in new[] { Packages.Meta, Packages.Maui }
+        from tfm in Packages.AndroidTargetFrameworks.Concat(Packages.IosTargetFrameworks)
+        select new object[] { packageId, tfm };
+
+    [SkippableTheory]
+    [MemberData(nameof(CrossPlatformPackagesAndFrameworks))]
+    public void Cross_platform_packages_carry_an_assembly_for_every_target_framework(
+        string packageId, string tfm)
     {
-        Skip.IfNot(Packages.Exists(Packages.Meta), "the metapackage is only built on macOS");
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        using var package = Packages.OpenPackage(Packages.Meta);
+        using var package = Packages.OpenPackage(packageId);
 
-        var libEntries = package.Entries
-            .Where(e => e.FullName.StartsWith("lib/", StringComparison.Ordinal) && e.Length > 0)
-            .Select(e => e.FullName)
-            .ToList();
-
+        // These span both platforms, so unlike the bindings they must be present for all six
+        // target frameworks — a consumer multi-targeting Android and iOS resolves the same
+        // package on both legs.
+        var expected = $"lib/{tfm}/{packageId}.dll";
         Assert.True(
-            libEntries.Count == 0,
-            $"{Packages.Meta} is a dependency-only package but ships: {string.Join(", ", libEntries)}");
+            package.GetEntry(expected) is not null,
+            $"{packageId} is missing '{expected}'. It carries the cross-platform API, so every " +
+            "target framework needs an assembly, not just a dependency group.");
     }
 
     [Fact]
     public void Packages_declare_the_expected_nuspec_metadata()
     {
-        foreach (var id in new[] { Packages.Android, Packages.IOS, Packages.Meta })
+        foreach (var id in new[] { Packages.Android, Packages.IOS, Packages.Meta, Packages.Maui })
         {
             if (!Packages.Exists(id))
             {

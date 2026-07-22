@@ -1,4 +1,4 @@
-using AntMedia.Net.Sample.Streaming;
+using AntMedia.Net.Maui;
 using Microsoft.Extensions.Logging;
 
 namespace AntMedia.Net.Sample;
@@ -16,12 +16,9 @@ public static class MauiProgram
                 fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
                 fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
             })
-            .ConfigureMauiHandlers(handlers =>
-            {
-                // VideoSurface has no built-in handler; this is what maps it to the native view
-                // each platform's SDK renders into.
-                handlers.AddHandler<VideoSurface, VideoSurfaceHandler>();
-            });
+            // Registers the handler for AntMediaVideoView. MAUI does not discover third-party
+            // handlers on its own, so without this the view renders nothing.
+            .UseAntMedia();
 
 #if DEBUG
         builder.Logging.AddDebug();

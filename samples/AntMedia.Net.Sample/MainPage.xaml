@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:streaming="clr-namespace:AntMedia.Net.Sample.Streaming"
+             xmlns:antmedia="clr-namespace:AntMedia.Net.Maui;assembly=AntMedia.Net.Maui"
              x:Class="AntMedia.Net.Sample.MainPage"
              Title="AntMedia.Net">
 
@@ -16,12 +16,12 @@
         </VerticalStackLayout>
 
         <!--
-          Both surfaces exist for the whole session: creating one on demand would mean creating a
+          Both views exist for the whole session: creating one on demand would mean creating a
           native renderer mid-layout, which neither SDK expects.
         -->
         <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="8">
-            <streaming:VideoSurface x:Name="LocalSurface" Grid.Column="0" />
-            <streaming:VideoSurface x:Name="RemoteSurface" Grid.Column="1" />
+            <antmedia:AntMediaVideoView x:Name="LocalView" Grid.Column="0" />
+            <antmedia:AntMediaVideoView x:Name="RemoteView" Grid.Column="1" />
         </Grid>
 
         <HorizontalStackLayout Grid.Row="2" Spacing="8" HorizontalOptions="Center">

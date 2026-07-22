@@ -1,0 +1,67 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    MAUI conveniences over AntMedia.Net: the video view and its handlers, plus the platform glue a
+    MAUI app would otherwise write by hand (the Android Activity, and pulling the native view out
+    of a handler).
+
+    Separate from AntMedia.Net on purpose. Everything here needs Microsoft.Maui.Controls, and
+    forcing that on a plain .NET for Android or .NET for iOS consumer to get a WebRTC client would
+    be a poor trade.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks)</TargetFrameworks>
+
+    <AssemblyName>AntMedia.Net.Maui</AssemblyName>
+    <RootNamespace>AntMedia.Net.Maui</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!--
+      UseMauiCore rather than UseMaui: this is a library of handlers and extensions, not an app,
+      and the full UseMaui brings in app-only targets (resource generation, splash screens) that
+      have nothing to do here.
+    -->
+    <UseMauiCore>true</UseMauiCore>
+    <UseMauiEssentials>true</UseMauiEssentials>
+    <SingleProject>true</SingleProject>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <AntMediaDependencyVersion Condition=" '$(AntMediaDependencyVersion)' == '' ">$(Version)</AntMediaDependencyVersion>
+  </PropertyGroup>
+
+  <!-- Platform code is selected per target framework rather than by the default glob. -->
+  <ItemGroup>
+    <Compile Remove="Platforms/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">
+    <Compile Include="Platforms/Android/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <Compile Include="Platforms/iOS/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+    <PackageReference Include="AntMedia.Net" Version="[$(AntMediaDependencyVersion)]" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>AntMedia.Net.Maui</PackageId>
+    <Title>.NET MAUI video view and helpers for AntMedia.Net.</Title>
+    <Description>Adds an AntMediaVideoView control and the platform glue a .NET MAUI app needs to use AntMedia.Net: rendering into a native WebRTC surface, and supplying the Android Activity the SDK requires. Add AntMedia.Net on its own if you are not using MAUI.</Description>
+    <PackageTags>AntMedia;WebRTC;streaming;SDK;MAUI;Android;iOS;video</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../Nugets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+</Project>
