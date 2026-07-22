@@ -40,6 +40,11 @@ on:
         required: false
         default: net10.0-ios26.0
         type: string
+      e2e-mac-target-framework:
+        description: Which of the package's target frameworks the Mac Catalyst smoke test runs against.
+        required: false
+        default: net10.0-maccatalyst26.0
+        type: string
 
 env:
   DOTNET_NOLOGO: 'true'
@@ -53,6 +58,7 @@ jobs:
     outputs:
       android-tag: ${{ steps.resolve.outputs.android-tag }}
       ios-commit: ${{ steps.resolve.outputs.ios-commit }}
+      mac-webrtc-release: ${{ steps.resolve.outputs.mac-webrtc-release }}
     steps:
       - uses: actions/checkout@v4
 
@@ -65,9 +71,13 @@ jobs:
           ios="${{ inputs.ios-commit }}"
           echo "android-tag=${android:-${ANTMEDIA_ANDROID_TAG}}" >> "$GITHUB_OUTPUT"
           echo "ios-commit=${ios:-${ANTMEDIA_IOS_COMMIT}}" >> "$GITHUB_OUTPUT"
+          # No input override: the Mac Catalyst build takes the same Ant Media commit as iOS, and
+          # only the libwebrtc underneath differs. That one is a pin, not a knob.
+          echo "mac-webrtc-release=${ANTMEDIA_MAC_WEBRTC_RELEASE}" >> "$GITHUB_OUTPUT"
           {
             echo "Binding Ant Media Android \`${android:-${ANTMEDIA_ANDROID_TAG}}\`"
-            echo "and iOS \`${ios:-${ANTMEDIA_IOS_COMMIT}}\`"
+            echo "and iOS \`${ios:-${ANTMEDIA_IOS_COMMIT}}\`,"
+            echo "on Mac Catalyst against libwebrtc \`${ANTMEDIA_MAC_WEBRTC_RELEASE}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   pack-android:
@@ -140,7 +150,7 @@ jobs:
           retention-days: 7
 
   pack-apple:
-    name: pack iOS
+    name: pack Apple
     # Also needs pack-android: the metapackage declares a pinned dependency on
     # AntMedia.Net.Android for the Android target frameworks, and NuGet has to resolve it at
     # restore time, so that package must already exist in artifacts/ on this runner.
@@ -179,8 +189,8 @@ jobs:
       - name: Install iOS, Android and MAUI workloads for every SDK band
         run: |
           # This runner needs all four:
-          #   ios, android   AntMedia.Net targets both platforms' TFMs, so restoring it needs both
-          #                  even though only the Apple binding is packed here
+          #   ios, android,  AntMedia.Net targets all three platforms' TFMs, so restoring it needs
+          #   maccatalyst    all of them even though only the Apple bindings are packed here
           #   maui-*         AntMedia.Net.Maui is packed in the same run and its UseMauiCore build
           #                  fails with NETSDK1147 without them
           # Installed before packing rather than before the sample build, which is where they used
@@ -192,7 +202,7 @@ jobs:
             echo "installing ios+android+maui workloads for SDK ${sdk}"
             ( cd "${dir}" \
               && dotnet new globaljson --sdk-version "${sdk}" --force \
-              && dotnet workload install ios android maui-android maui-ios )
+              && dotnet workload install ios android maccatalyst maui-android maui-ios maui-maccatalyst )
           done
 
       - name: Set up Android SDK platforms
@@ -215,6 +225,19 @@ jobs:
       - name: Build the Ant Media iOS xcframework
         if: steps.xcframework.outputs.cache-hit != 'true'
         run: ./native/ios/fetch-ios.sh "${{ needs.pins.outputs.ios-commit }}"
+
+      - name: Cache the Mac Catalyst xcframeworks
+        id: mac-xcframework
+        uses: actions/cache@v4
+        with:
+          path: src/AntMedia.Net.Mac/lib
+          # Same Ant Media commit and facade as iOS, plus the stock libwebrtc release and the shim
+          # that adapts their Swift to it — any of the four changes the produced framework.
+          key: antmedia-mac-xcframework-${{ needs.pins.outputs.ios-commit }}-${{ needs.pins.outputs.mac-webrtc-release }}-${{ hashFiles('native/ios/**', 'native/mac/**') }}
+
+      - name: Build the Mac Catalyst xcframework
+        if: steps.mac-xcframework.outputs.cache-hit != 'true'
+        run: ./native/mac/fetch-mac.sh "${{ needs.pins.outputs.ios-commit }}"
 
       - name: Pack
         run: ./build/BuildNugets.sh "${{ inputs.version }}" apple
@@ -251,6 +274,12 @@ jobs:
           dotnet build samples/AntMedia.Net.Sample \
             -c Debug -f net9.0-ios18.0 \
             -p:RuntimeIdentifier=iossimulator-arm64 \
+            -p:AntMediaPackageVersion="${{ inputs.version }}"
+          echo "::endgroup::"
+
+          echo "::group::sample net9.0-maccatalyst18.0"
+          dotnet build samples/AntMedia.Net.Sample \
+            -c Debug -f net9.0-maccatalyst18.0 \
             -p:AntMediaPackageVersion="${{ inputs.version }}"
           echo "::endgroup::"
 
@@ -524,5 +553,56 @@ jobs:
         with:
           name: ios-device-test-logs
           path: device-tests-simulator.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-mac:
+    name: Mac Catalyst smoke test
+    needs: [pack-apple, validate]
+    # arm64. AntMedia.Net.Mac ships an arm64 Catalyst slice only, because Ant Media renders
+    # through OpenGL when arch != arm64 and Mac Catalyst has no OpenGL.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: ./.github/scripts/select-xcode.sh
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Mac Catalyst workload
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install maccatalyst )
+          dotnet workload install maccatalyst
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      # Offline only. The live publish check needs a camera and a microphone, and a CI runner has
+      # neither the devices nor anyone to answer the permission prompt, so ANTMEDIA_TEST_SERVER is
+      # deliberately left unset and the app reports the live check as SKIP.
+      - name: Run smoke tests
+        run: ./.github/scripts/run-mac-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-mac-target-framework }}"
+
+      - name: Run smoke tests, fully trimmed
+        run: ANTMEDIA_TRIMMING=full ./.github/scripts/run-mac-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-mac-target-framework }}"
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-device-test-logs
+          path: device-tests-maccatalyst.log
           if-no-files-found: ignore
           retention-days: 7

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.sbokatuk.antmedia.macdevicetests</string>
+	<key>CFBundleName</key>
+	<string>AntMediaMacDeviceTests</string>
+	<key>CFBundleDisplayName</key>
+	<string>AntMedia.Net Mac device tests</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>2</integer>
+	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<!--
+	  The live check opens the camera and microphone; macOS terminates the app rather than
+	  failing the call if either is missing a usage description. Declared even for offline-only
+	  runs so the failure mode never depends on which checks ran.
+	-->
+	<key>NSCameraUsageDescription</key>
+	<string>Required by the Ant Media WebRTC SDK to publish video.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Required by the Ant Media WebRTC SDK to publish audio.</string>
+</dict>
+</plist>

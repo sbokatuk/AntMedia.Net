@@ -5,7 +5,7 @@ namespace AntMedia.Net.Sample;
 
 /// <summary>
 /// Publishes and plays a stream. The whole app is this one file — there is no per-platform code,
-/// because <c>AntMedia.Net</c> presents the same client on Android and iOS and
+/// because <c>AntMedia.Net</c> presents the same client on Android, iOS and Mac Catalyst and
 /// <c>AntMedia.Net.Maui</c> supplies the video view and the Android <c>Activity</c>.
 /// </summary>
 public partial class MainPage : ContentPage

@@ -1,5 +1,11 @@
 using Microsoft.Maui.Handlers;
 
+#if ANDROID
+using Org.Webrtc;
+#elif IOS || MACCATALYST
+using UIKit;
+#endif
+
 namespace AntMedia.Net.Maui;
 
 /// <summary>
@@ -14,9 +20,49 @@ public class AntMediaVideoView : View
 {
 }
 
+// The handler's platform half is selected with #if rather than by putting each platform's file
+// under Platforms/. MAUI's SingleProject owns that convention and re-adds its own Platforms/<id>
+// globs after this project's items are evaluated, so a hand-rolled include for Mac Catalyst
+// (which reuses the iOS half) was silently dropped and the type ended up with no base class.
+
+#if ANDROID
+
 /// <summary>
-/// Shared half of the handler. Each platform's half declares the base class, which is what binds
-/// <see cref="AntMediaVideoView" /> to that platform's native view type.
+/// Android half: the native view is org.webrtc's SurfaceViewRenderer, which is what
+/// WebRTCClientBuilder takes for both the local preview and the remote stream.
+/// </summary>
+public partial class AntMediaVideoViewHandler : ViewHandler<AntMediaVideoView, SurfaceViewRenderer>
+{
+    /// <inheritdoc />
+    protected override SurfaceViewRenderer CreatePlatformView() => new(Context);
+
+    /// <inheritdoc />
+    protected override void DisconnectHandler(SurfaceViewRenderer platformView)
+    {
+        // The renderer holds an EGL context and a native surface. Leaving it initialised leaks
+        // both, and after a few navigations exhausts the surface pool.
+        platformView.Release();
+        base.DisconnectHandler(platformView);
+    }
+}
+
+#elif IOS || MACCATALYST
+
+/// <summary>
+/// iOS half, shared with Mac Catalyst: the facade's SetLocalView/SetRemoteView take a plain UIView
+/// and add their own renderer inside it, so there is nothing SDK-specific to create here.
+/// </summary>
+public partial class AntMediaVideoViewHandler : ViewHandler<AntMediaVideoView, UIView>
+{
+    /// <inheritdoc />
+    protected override UIView CreatePlatformView() => new() { BackgroundColor = UIColor.Black };
+}
+
+#endif
+
+/// <summary>
+/// Shared half of the handler. The platform half above declares the base class, which is what
+/// binds <see cref="AntMediaVideoView" /> to that platform's native view type.
 /// </summary>
 public partial class AntMediaVideoViewHandler
 {

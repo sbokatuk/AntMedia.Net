@@ -7,13 +7,14 @@ set -euo pipefail
 #   ./build/BuildNugets.sh                            # version from Directory.Build.props
 #   ./build/BuildNugets.sh 2.17.2-beta.4              # explicit package version
 #   ./build/BuildNugets.sh 2.17.2-beta.4 android      # only AntMedia.Net.Android
-#   ./build/BuildNugets.sh 2.17.2-beta.4 apple        # only AntMedia.Net.iOS + AntMedia.Net
+#   ./build/BuildNugets.sh 2.17.2-beta.4 apple        # only the Apple bindings + AntMedia.Net
 #
 # The scope argument exists for CI, which packs Android on a Linux runner and the Apple packages
 # on a macOS one. It defaults to 'all', minus iOS when not running on macOS.
 #
 # Run the native fetch scripts first — native/android/fetch-android.sh and, on macOS,
-# native/ios/fetch-ios.sh — or the bindings will pack without their native payload.
+# native/ios/fetch-ios.sh and native/mac/fetch-mac.sh — or the bindings will pack without
+# their native payload.
 #
 # Packages are written to ./artifacts.
 #
@@ -22,7 +23,7 @@ set -euo pipefail
 # build/merge-packages.py. global.json pins the .NET 9 SDK, and the SDK is resolved from the
 # working directory, so the second pass runs from a scratch directory carrying its own global.json.
 #
-# On anything other than macOS the iOS packages are skipped: they need Xcode. Android packs
+# On anything other than macOS the Apple packages are skipped: they need Xcode. Android packs
 # everywhere.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -70,12 +71,13 @@ fi
 if [ "${SCOPE}" = "all" ] || [ "${SCOPE}" = "apple" ]; then
     if [ "${IS_MACOS}" = true ]; then
         PLATFORM_PROJECTS+=("${ROOT}/src/AntMedia.Net.iOS/AntMedia.Net.iOS.csproj")
+        PLATFORM_PROJECTS+=("${ROOT}/src/AntMedia.Net.Mac/AntMedia.Net.Mac.csproj")
         PACK_METAPACKAGE=true
     elif [ "${SCOPE}" = "apple" ]; then
         echo "::error::scope 'apple' requires macOS with Xcode" >&2
         exit 1
     else
-        echo "==> not macOS: skipping the iOS and metapackage builds"
+        echo "==> not macOS: skipping the Apple and metapackage builds"
     fi
 fi
 
@@ -96,8 +98,15 @@ EOF
 
 # Packs one project in both SDK bands, then merges the two packages into artifacts/.
 pack_and_merge() {
-    local project="$1" name
+    local project="$1" name directory
     name="$(basename "${project}" .csproj)"
+    directory="$(dirname "${project}")"
+
+    # From clean, every time. An incremental pack of a project that both targets Android and
+    # depends on an Android *binding* package rolls the binding's extracted library projects
+    # (obj/*/lp/**) into this project's own .aar on the second run - which took AntMedia.Net from
+    # 131 KB to 20 MB, silently, and only ever locally, because CI always starts empty.
+    rm -rf "${directory}/obj" "${directory}/bin"
 
     echo "==> packing ${name} (${PASS1_BAND} band)"
     dotnet pack "${project}" \
@@ -126,7 +135,7 @@ done
 if [ "${PACK_METAPACKAGE}" = true ]; then
     # Order matters, and each step depends on the previous one's output being in artifacts/:
     #
-    #   AntMedia.Net       pinned dependency on both platform bindings
+    #   AntMedia.Net       pinned dependency on all three platform bindings
     #   AntMedia.Net.Maui  pinned dependency on AntMedia.Net
     #
     # They are PackageReferences rather than ProjectReferences so the packed dependency graph is

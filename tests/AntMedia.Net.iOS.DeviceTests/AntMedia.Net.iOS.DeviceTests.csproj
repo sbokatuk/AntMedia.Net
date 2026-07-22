@@ -67,6 +67,9 @@
       last released package instead of the one under test.
     -->
     <PackageReference Include="AntMedia.Net.iOS" Version="[$(AntMediaPackageVersion)]" />
+
+    <!-- For LiveStreamTest, which goes through the cross-platform client a consumer would use. -->
+    <PackageReference Include="AntMedia.Net" Version="[$(AntMediaPackageVersion)]" />
   </ItemGroup>
 
   <Target Name="ValidateAntMediaPackageVersion" BeforeTargets="Restore;Build"

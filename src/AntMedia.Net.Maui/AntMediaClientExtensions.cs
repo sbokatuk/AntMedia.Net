@@ -28,12 +28,8 @@ public static class AntMediaClientExtensions
                 "constructor.");
 
         return new AntMediaClient(options, activity);
-#elif IOS
-        return new AntMediaClient(options);
 #else
-        throw new PlatformNotSupportedException(
-            "AntMedia.Net supports Android and iOS. Mac Catalyst is not supported because Ant " +
-            "Media publishes no Catalyst slice for its iOS SDK.");
+        return new AntMediaClient(options);
 #endif
     }
 
@@ -53,7 +49,7 @@ public static class AntMediaClientExtensions
 
 #if ANDROID
         ((AntMediaClient)client).SetLocalRenderer(native);
-#elif IOS
+#elif IOS || MACCATALYST
         ((AntMediaClient)client).SetLocalView(native);
 #endif
     }
@@ -69,7 +65,7 @@ public static class AntMediaClientExtensions
 
 #if ANDROID
         ((AntMediaClient)client).SetRemoteRenderer(native);
-#elif IOS
+#elif IOS || MACCATALYST
         ((AntMediaClient)client).SetRemoteView(native);
 #endif
     }
@@ -77,7 +73,9 @@ public static class AntMediaClientExtensions
 #if ANDROID
     private static Org.Webrtc.SurfaceViewRenderer PlatformView(AntMediaVideoView view) =>
         view.Handler?.PlatformView as Org.Webrtc.SurfaceViewRenderer ?? throw NotRealised();
-#elif IOS
+#elif IOS || MACCATALYST
+    // One branch for both: UIKit is what Mac Catalyst renders with, so the facade's
+    // SetLocalView/SetRemoteView take the same UIView there as on iOS.
     private static UIKit.UIView PlatformView(AntMediaVideoView view) =>
         view.Handler?.PlatformView as UIKit.UIView ?? throw NotRealised();
 #else

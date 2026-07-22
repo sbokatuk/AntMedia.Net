@@ -45,6 +45,17 @@
     <AntMediaIosRepository>https://github.com/ant-media/WebRTC-iOS-SDK</AntMediaIosRepository>
     <AntMediaIosCommit>47e2b0201959f56f26096a00edd7277d2cb87449</AntMediaIosCommit>
     <AntMediaIosCommitDate>2025-11-14</AntMediaIosCommitDate>
+
+    <!--
+      The Mac Catalyst build compiles the *same* Ant Media commit, but against a stock libwebrtc
+      rather than Ant Media's own. It has to: their build is a fork - it adds RTCAudioDeviceModule -
+      published for iOS only, with no source, so no Catalyst slice can be produced from it. This
+      one ships maccatalyst. See native/mac/fetch-mac.sh and the shim beside it.
+
+      iOS and Android are untouched by this and keep using Ant Media's own libraries.
+    -->
+    <AntMediaMacWebRtcRelease>150.0.0</AntMediaMacWebRtcRelease>
+    <AntMediaMacWebRtcUrl>https://github.com/stasel/WebRTC/releases/download/$(AntMediaMacWebRtcRelease)/WebRTC-M150.xcframework.zip</AntMediaMacWebRtcUrl>
   </PropertyGroup>
 
   <!--
@@ -72,6 +83,16 @@
 
     <AntMediaIosTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0-ios18.0;net9.0-ios18.0</AntMediaIosTargetFrameworks>
     <AntMediaIosTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-ios26.0</AntMediaIosTargetFrameworks>
+
+    <!--
+      Mac Catalyst streams like the other two, through AntMedia.Net.Mac. Apple Silicon only: the
+      SDK's renderer falls back to OpenGL when arch != arm64 and Mac Catalyst has no OpenGL, so
+      no x86_64 slice exists. See the Catalyst section in docs/BUILD.md.
+
+      Same band split as iOS, verified the same way.
+    -->
+    <AntMediaMacCatalystTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0-maccatalyst18.0;net9.0-maccatalyst18.0</AntMediaMacCatalystTargetFrameworks>
+    <AntMediaMacCatalystTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-maccatalyst26.0</AntMediaMacCatalystTargetFrameworks>
   </PropertyGroup>
 
   <!--

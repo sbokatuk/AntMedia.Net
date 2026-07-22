@@ -10,7 +10,7 @@
     directory whose global.json selects the .NET 10 SDK.
   -->
   <PropertyGroup>
-    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks)</TargetFrameworks>
+    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks);$(AntMediaMacCatalystTargetFrameworks)</TargetFrameworks>
 
     <OutputType>Exe</OutputType>
     <RootNamespace>AntMedia.Net.Sample</RootNamespace>
@@ -27,6 +27,14 @@
 
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">23.0</SupportedOSPlatformVersion>
     <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">13.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">15.0</SupportedOSPlatformVersion>
+
+    <!--
+      Apple Silicon only, and stated here rather than left to the default: a Catalyst build
+      defaults to both architectures, and AntMedia.Net.Mac has no x86_64 slice because Ant Media
+      renders through OpenGL when arch != arm64 and Mac Catalyst has no OpenGL.
+    -->
+    <RuntimeIdentifiers Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">maccatalyst-arm64</RuntimeIdentifiers>
   </PropertyGroup>
 
   <ItemGroup>

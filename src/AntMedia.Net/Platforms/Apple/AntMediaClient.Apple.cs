@@ -1,10 +1,19 @@
+#if MACCATALYST
+using AntMedia.Net.Mac;
+#else
 using AntMedia.Net.iOS;
+#endif
 using UIKit;
 
 namespace AntMedia.Net;
 
 /// <summary>
-/// iOS half, built on the @objc facade's AMSClient and AMSClientDelegate.
+/// Apple half, built on the @objc facade's AMSClient and AMSClientDelegate.
+///
+/// One file for iOS and Mac Catalyst: the two bindings are generated from the same ApiDefinition
+/// and expose the same facade, so only the namespace differs. What differs underneath — Ant
+/// Media's own libwebrtc on iOS, a stock Catalyst-capable build plus a shim on macOS — is settled
+/// in native/mac/fetch-mac.sh and never reaches here.
 /// </summary>
 public sealed partial class AntMediaClient
 {

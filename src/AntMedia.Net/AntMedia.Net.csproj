@@ -12,7 +12,7 @@
     macOS - restoring the iOS legs needs the iOS workload. See build/BuildNugets.sh.
   -->
   <PropertyGroup>
-    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks)</TargetFrameworks>
+    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks);$(AntMediaMacCatalystTargetFrameworks)</TargetFrameworks>
 
     <AssemblyName>AntMedia.Net</AssemblyName>
     <RootNamespace>AntMedia.Net</RootNamespace>
@@ -39,17 +39,27 @@
     <PackageReference Include="AntMedia.Net.Android" Version="[$(AntMediaDependencyVersion)]" />
   </ItemGroup>
 
+  <!--
+    iOS and Mac Catalyst share Platforms/Apple: the two bindings are generated from one
+    ApiDefinition and differ only in namespace. They are separate packages because the native
+    payload underneath is different — see AntMedia.Net.Mac.csproj.
+  -->
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-    <Compile Include="Platforms/iOS/**/*.cs" />
+    <Compile Include="Platforms/Apple/**/*.cs" />
     <PackageReference Include="AntMedia.Net.iOS" Version="[$(AntMediaDependencyVersion)]" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
+    <Compile Include="Platforms/Apple/**/*.cs" />
+    <PackageReference Include="AntMedia.Net.Mac" Version="[$(AntMediaDependencyVersion)]" />
   </ItemGroup>
 
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>AntMedia.Net</PackageId>
     <Title>Cross-platform .NET client for the Ant Media WebRTC SDKs.</Title>
-    <Description>One API over the Ant Media WebRTC SDKs for Android and iOS: publish and play streams with awaitable calls and ordinary .NET events, instead of writing a per-platform adapter over a Java listener interface and an Objective-C delegate. Pulls in the platform binding that matches whichever target framework you build. For .NET MAUI apps, add AntMedia.Net.Maui for the video view.</Description>
-    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;Android;iOS;Binding</PackageTags>
+    <Description>One API over the Ant Media WebRTC SDKs for Android, iOS and Mac Catalyst: publish and play streams with awaitable calls and ordinary .NET events, instead of writing a per-platform adapter over a Java listener interface and an Objective-C delegate. Pulls in the platform binding that matches whichever target framework you build. For .NET MAUI apps, add AntMedia.Net.Maui for the video view.</Description>
+    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;Android;iOS;MacCatalyst;Binding</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>

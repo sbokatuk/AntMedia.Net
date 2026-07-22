@@ -1,25 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <!--
-      Set per SDK band in Directory.Build.props: the .NET 9 band builds net8+net9 and the .NET 10
-      band builds net10, so build/BuildNugets.sh packs twice and merges the results.
-    -->
-    <TargetFrameworks>$(AntMediaIosTargetFrameworks)</TargetFrameworks>
-    <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
+  <!--
+    The Mac Catalyst sibling of AntMedia.Net.iOS.
 
-    <AssemblyName>AntMedia.Net.iOS</AssemblyName>
-    <RootNamespace>AntMedia.Net.iOS</RootNamespace>
+    Same Ant Media commit, same @objc facade, same ApiDefinition — linked from the iOS project
+    rather than copied, so the two bindings cannot drift. What differs is underneath: Ant Media
+    publishes their libwebrtc fork for iOS only, so this build links a stock community libwebrtc
+    that ships a maccatalyst slice, plus the shim in native/mac/Shim that supplies the fork-only
+    API their Swift code calls. See native/mac/fetch-mac.sh.
+
+    Apple Silicon only. Ant Media picks its renderer with #if arch(arm64) — Metal on arm64, OpenGL
+    otherwise — and Mac Catalyst has no OpenGL, so an x86_64 slice cannot be produced at all.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>$(AntMediaMacCatalystTargetFrameworks)</TargetFrameworks>
+    <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+
+    <AssemblyName>AntMedia.Net.Mac</AssemblyName>
+    <RootNamespace>AntMedia.Net.Mac</RootNamespace>
     <LangVersion>latest</LangVersion>
     <Nullable>disable</Nullable>
     <ImplicitUsings>false</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsBindingProject>true</IsBindingProject>
-    <!--
-      The xcframeworks are dynamic, so they cannot be embedded into this assembly and linked from
-      there — the consuming app's linker never sees them. They travel beside the assembly instead;
-      see the NativeReference block below.
-    -->
+
+    <!-- Dynamic frameworks; see the comment in AntMedia.Net.iOS.csproj and the .targets below. -->
     <NoBindingEmbedding>true</NoBindingEmbedding>
 
     <!-- CS1591: the generated binding carries no XML doc comments. -->
@@ -33,12 +38,16 @@
 
   <Target Name="ValidateAntMediaXcframeworks" BeforeTargets="Build;Pack"
           Condition="!Exists('$(MSBuildProjectDirectory)/lib/WebRTCiOSSDK.xcframework')">
-    <Error Text="lib/WebRTCiOSSDK.xcframework is missing. Run native/ios/fetch-ios.sh first." />
+    <Error Text="lib/WebRTCiOSSDK.xcframework is missing. Run native/mac/fetch-mac.sh first." />
   </Target>
 
   <ItemGroup>
-    <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
-    <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
+    <!--
+      Linked, not copied. The namespace inside switches on MACCATALYST, so the same file produces
+      AntMedia.Net.iOS on iOS and AntMedia.Net.Mac here.
+    -->
+    <ObjcBindingApiDefinition Include="../AntMedia.Net.iOS/ApiDefinition.cs" Link="ApiDefinition.cs" />
+    <ObjcBindingCoreSource Include="../AntMedia.Net.iOS/StructsAndEnums.cs" Link="StructsAndEnums.cs" />
   </ItemGroup>
 
   <!--
@@ -64,18 +73,10 @@
   -->
 
   <ItemGroup>
-    <!--
-      Built from source with our @objc facade compiled in — see native/ios/fetch-ios.sh. The
-      xcframework Ant Media checks in cannot be used: its Objective-C surface is two empty classes.
-    -->
     <NativeReference Include="lib/WebRTCiOSSDK.xcframework">
       <Kind>Framework</Kind>
     </NativeReference>
 
-    <!--
-      Ant Media's build of libwebrtc, taken as-is. WebRTCiOSSDK links against it, so it has to
-      ship alongside; the Frameworks list is what libwebrtc itself dlopens.
-    -->
     <NativeReference Include="lib/WebRTC.xcframework">
       <Kind>Framework</Kind>
       <Frameworks>AVFoundation AudioToolbox CoreAudio CoreMedia CoreVideo CoreGraphics VideoToolbox Metal MetalKit</Frameworks>
@@ -85,16 +86,15 @@
   <!-- Packaging -->
   <PropertyGroup>
     <IsPackable>true</IsPackable>
-    <PackageId>AntMedia.Net.iOS</PackageId>
-    <Title>.NET for iOS bindings for the Ant Media WebRTC iOS SDK.</Title>
-    <Description>.NET for iOS / .NET MAUI bindings for the Ant Media WebRTC iOS SDK, built from ant-media/WebRTC-iOS-SDK. Lets a .NET app publish and play WebRTC streams through an Ant Media Server. The upstream SDK is Swift and exposes almost nothing to Objective-C, so this package binds an @objc facade maintained alongside it — see the project site for the API surface.</Description>
-    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;iOS;dotnet-ios;Binding</PackageTags>
+    <PackageId>AntMedia.Net.Mac</PackageId>
+    <Title>Mac Catalyst bindings for the Ant Media WebRTC SDK.</Title>
+    <Description>.NET for Mac Catalyst / .NET MAUI bindings for the Ant Media WebRTC iOS SDK, built from ant-media/WebRTC-iOS-SDK against a Mac Catalyst build of libwebrtc. Lets a .NET MAUI app publish and play WebRTC streams through an Ant Media Server on macOS. Apple Silicon only. Same API surface as AntMedia.Net.iOS; use AntMedia.Net for one client across all platforms.</Description>
+    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;macOS;MacCatalyst;Binding</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
     <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
-
   </ItemGroup>
 
 </Project>
