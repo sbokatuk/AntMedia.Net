@@ -70,6 +70,18 @@ fi
 mkdir -p "$(dirname "${DESTINATION}")"
 cp "${AAR}" "${DESTINATION}"
 
+# A jar of the Java sources, purely for their javadoc: the binding generator extracts it and emits
+# real XML documentation, so IntelliSense shows what a member does instead of nothing. Built here
+# with `jar` rather than through gradle's androidSourcesJar task, which is defined in
+# publish-remote.gradle alongside the signing and Maven configuration and drags that in with it.
+SOURCES="${CHECKOUT}/webrtc-android-framework/src/main/java"
+if [ -d "${SOURCES}" ]; then
+    ( cd "${SOURCES}" && jar cf "${DESTINATION%.aar}-sources.jar" . )
+    echo "==> sources jar: $(du -h "${DESTINATION%.aar}-sources.jar" | cut -f1)"
+else
+    echo "::warning::${SOURCES} not found; the binding will have no documentation" >&2
+fi
+
 # The version the framework declares for itself, which is not always the tag name — v2.17.2 is
 # built from sources that still say PUBLISH_VERSION = '2.17.1'. Recorded for the build summary.
 SDK_VERSION="$(sed -n "s/.*PUBLISH_VERSION *= *'\\([^']*\\)'.*/\\1/p" \

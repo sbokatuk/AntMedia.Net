@@ -50,6 +50,16 @@
       native/android/fetch-android.sh, so it is not in git.
     -->
     <AndroidLibrary Include="Jars/webrtc-android-framework.aar" Bind="true" />
+
+    <!--
+      The same sources, for their javadoc alone. The generator turns it into XML documentation, so
+      consumers get IntelliSense on the bound API; without it the package documents exactly one
+      type, the generated Resource class. Produced by native/android/fetch-android.sh, so it is
+      not in git — and optional, because a checkout that has only run an older fetch script should
+      still build, just without docs.
+    -->
+    <JavaSourceJar Include="Jars/webrtc-android-framework-sources.jar"
+                   Condition="Exists('$(MSBuildProjectDirectory)/Jars/webrtc-android-framework-sources.jar')" />
   </ItemGroup>
 
   <ItemGroup>

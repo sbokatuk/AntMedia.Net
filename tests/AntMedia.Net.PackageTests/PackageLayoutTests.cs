@@ -109,6 +109,26 @@ public class PackageLayoutTests
             "target framework needs an assembly, not just a dependency group.");
     }
 
+    [Theory]
+    [MemberData(nameof(Packages.AndroidFrameworks), MemberType = typeof(Packages))]
+    public void Android_package_ships_documentation_for_the_bound_api(string tfm)
+    {
+        using var package = Packages.OpenPackage(Packages.Android);
+
+        using var xml = Packages.ReadEntry(package, $"lib/{tfm}/AntMedia.Net.Android.xml");
+        var document = System.Xml.Linq.XDocument.Load(xml);
+        var members = document.Descendants("member").Count();
+
+        // The docs come from the SDK's own javadoc, via the sources jar that
+        // native/android/fetch-android.sh builds. That jar is referenced conditionally so a
+        // checkout without it still compiles — which means losing it would silently ship a
+        // package documenting only the generated Resource class, as this one used to.
+        Assert.True(
+            members > 100,
+            $"{Packages.Android} ({tfm}) documents only {members} members. The javadoc sources " +
+            "jar was probably not built — see native/android/fetch-android.sh.");
+    }
+
     [Fact]
     public void Packages_declare_the_expected_nuspec_metadata()
     {
