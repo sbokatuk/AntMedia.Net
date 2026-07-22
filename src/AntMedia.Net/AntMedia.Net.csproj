@@ -39,18 +39,19 @@
     <PackageReference Include="AntMedia.Net.Android" Version="[$(AntMediaDependencyVersion)]" />
   </ItemGroup>
 
+  <!--
+    iOS and Mac Catalyst share Platforms/Apple: the two bindings are generated from one
+    ApiDefinition and differ only in namespace. They are separate packages because the native
+    payload underneath is different — see AntMedia.Net.Mac.csproj.
+  -->
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
-    <Compile Include="Platforms/iOS/**/*.cs" />
+    <Compile Include="Platforms/Apple/**/*.cs" />
     <PackageReference Include="AntMedia.Net.iOS" Version="[$(AntMediaDependencyVersion)]" />
   </ItemGroup>
 
-  <!--
-    No binding dependency for Mac Catalyst: there is no Ant Media framework for it, which is the
-    whole reason this leg only throws. Shipping the iOS binding here would drag a 28 MB pair of
-    iOS-only xcframeworks into an app that cannot use them.
-  -->
   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'">
-    <Compile Include="Platforms/MacCatalyst/**/*.cs" />
+    <Compile Include="Platforms/Apple/**/*.cs" />
+    <PackageReference Include="AntMedia.Net.Mac" Version="[$(AntMediaDependencyVersion)]" />
   </ItemGroup>
 
   <PropertyGroup>

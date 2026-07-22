@@ -28,17 +28,8 @@ public static class AntMediaClientExtensions
                 "constructor.");
 
         return new AntMediaClient(options, activity);
-#elif IOS
-        return new AntMediaClient(options);
 #else
-        // Reached on Mac Catalyst. AntMediaClient's Catalyst half throws the same thing from its
-        // constructor; this is here so the failure is identical whichever way a client is created.
-        throw new PlatformNotSupportedException(
-            "AntMedia.Net does not support Mac Catalyst. Ant Media publishes its iOS WebRTC " +
-            "framework for iOS only — there is no Mac Catalyst slice — so there is nothing to " +
-            "bind against on this platform. Android and iOS are supported. This package targets " +
-            "Mac Catalyst purely so that a multi-targeted MAUI app can reference it without the " +
-            "restore failing.");
+        return new AntMediaClient(options);
 #endif
     }
 
@@ -83,8 +74,8 @@ public static class AntMediaClientExtensions
     private static Org.Webrtc.SurfaceViewRenderer PlatformView(AntMediaVideoView view) =>
         view.Handler?.PlatformView as Org.Webrtc.SurfaceViewRenderer ?? throw NotRealised();
 #elif IOS || MACCATALYST
-    // UIKit is present on Mac Catalyst too, so the view resolves there and a page containing one
-    // lays out normally. Only the client refuses to start.
+    // One branch for both: UIKit is what Mac Catalyst renders with, so the facade's
+    // SetLocalView/SetRemoteView take the same UIView there as on iOS.
     private static UIKit.UIView PlatformView(AntMediaVideoView view) =>
         view.Handler?.PlatformView as UIKit.UIView ?? throw NotRealised();
 #else

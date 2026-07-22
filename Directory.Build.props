@@ -85,11 +85,9 @@
     <AntMediaIosTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-ios26.0</AntMediaIosTargetFrameworks>
 
     <!--
-      Mac Catalyst is present so that a .NET MAUI app can *reference* these packages - the MAUI
-      template targets maccatalyst by default, and without assets for it NuGet fails the whole
-      restore with NU1202 and the developer has to edit TargetFrameworks before they can start.
-      It does not stream: see the Catalyst section in docs/BUILD.md. Constructing a client throws
-      PlatformNotSupportedException with that explanation.
+      Mac Catalyst streams like the other two, through AntMedia.Net.Mac. Apple Silicon only: the
+      SDK's renderer falls back to OpenGL when arch != arm64 and Mac Catalyst has no OpenGL, so
+      no x86_64 slice exists. See the Catalyst section in docs/BUILD.md.
 
       Same band split as iOS, verified the same way.
     -->

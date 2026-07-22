@@ -4,7 +4,14 @@ using Foundation;
 using ObjCRuntime;
 using UIKit;
 
+#if MACCATALYST
+// Same source, two packages: AntMedia.Net.iOS binds Ant Media's own build, AntMedia.Net.Mac binds
+// the Mac Catalyst build produced by native/mac/fetch-mac.sh. The facade they expose is identical,
+// so the ApiDefinition is linked into both projects and only the namespace differs.
+namespace AntMedia.Net.Mac;
+#else
 namespace AntMedia.Net.iOS;
+#endif
 
 // Bound against the @objc facade in native/ios/Facade/AntMediaNetFacade.swift, which is compiled
 // into WebRTCiOSSDK.xcframework by native/ios/fetch-ios.sh. The upstream Swift SDK exposes almost

@@ -1,0 +1,83 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The Mac Catalyst sibling of AntMedia.Net.iOS.
+
+    Same Ant Media commit, same @objc facade, same ApiDefinition — linked from the iOS project
+    rather than copied, so the two bindings cannot drift. What differs is underneath: Ant Media
+    publishes their libwebrtc fork for iOS only, so this build links a stock community libwebrtc
+    that ships a maccatalyst slice, plus the shim in native/mac/Shim that supplies the fork-only
+    API their Swift code calls. See native/mac/fetch-mac.sh.
+
+    Apple Silicon only. Ant Media picks its renderer with #if arch(arm64) — Metal on arm64, OpenGL
+    otherwise — and Mac Catalyst has no OpenGL, so an x86_64 slice cannot be produced at all.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>$(AntMediaMacCatalystTargetFrameworks)</TargetFrameworks>
+    <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+
+    <AssemblyName>AntMedia.Net.Mac</AssemblyName>
+    <RootNamespace>AntMedia.Net.Mac</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>false</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsBindingProject>true</IsBindingProject>
+
+    <!-- Dynamic frameworks; see the comment in AntMedia.Net.iOS.csproj and the .targets below. -->
+    <NoBindingEmbedding>true</NoBindingEmbedding>
+
+    <!-- CS1591: the generated binding carries no XML doc comments. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <Target Name="ValidateAntMediaSdkBand" BeforeTargets="Build;Pack"
+          Condition=" '$(TargetFrameworks)' == '' ">
+    <Error Text="AntMediaSdkBand must be 'net9' or 'net10', but was '$(AntMediaSdkBand)'." />
+  </Target>
+
+  <Target Name="ValidateAntMediaXcframeworks" BeforeTargets="Build;Pack"
+          Condition="!Exists('$(MSBuildProjectDirectory)/lib/WebRTCiOSSDK.xcframework')">
+    <Error Text="lib/WebRTCiOSSDK.xcframework is missing. Run native/mac/fetch-mac.sh first." />
+  </Target>
+
+  <ItemGroup>
+    <!--
+      Linked, not copied. The namespace inside switches on MACCATALYST, so the same file produces
+      AntMedia.Net.iOS on iOS and AntMedia.Net.Mac here.
+    -->
+    <ObjcBindingApiDefinition Include="../AntMedia.Net.iOS/ApiDefinition.cs" Link="ApiDefinition.cs" />
+    <ObjcBindingCoreSource Include="../AntMedia.Net.iOS/StructsAndEnums.cs" Link="StructsAndEnums.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <NativeReference Include="lib/WebRTCiOSSDK.xcframework">
+      <Kind>Framework</Kind>
+    </NativeReference>
+
+    <NativeReference Include="lib/WebRTC.xcframework">
+      <Kind>Framework</Kind>
+      <Frameworks>AVFoundation AudioToolbox CoreAudio CoreMedia CoreVideo CoreGraphics VideoToolbox Metal MetalKit</Frameworks>
+    </NativeReference>
+  </ItemGroup>
+
+  <!-- Packaging -->
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <PackageId>AntMedia.Net.Mac</PackageId>
+    <Title>Mac Catalyst bindings for the Ant Media WebRTC SDK.</Title>
+    <Description>.NET for Mac Catalyst / .NET MAUI bindings for the Ant Media WebRTC iOS SDK, built from ant-media/WebRTC-iOS-SDK against a Mac Catalyst build of libwebrtc. Lets a .NET MAUI app publish and play WebRTC streams through an Ant Media Server on macOS. Apple Silicon only. Same API surface as AntMedia.Net.iOS; use AntMedia.Net for one client across all platforms.</Description>
+    <PackageTags>AntMedia;WebRTC;streaming;RTMP;HLS;SDK;MAUI;macOS;MacCatalyst;Binding</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+
+    <None Include="lib/WebRTCiOSSDK.xcframework/**" Pack="true" PackagePath="native/WebRTCiOSSDK.xcframework/" Visible="false" />
+    <None Include="lib/WebRTC.xcframework/**" Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
+
+    <None Include="build/AntMedia.Net.Mac.targets" Pack="true" PackagePath="build/" Visible="false" />
+  </ItemGroup>
+
+</Project>

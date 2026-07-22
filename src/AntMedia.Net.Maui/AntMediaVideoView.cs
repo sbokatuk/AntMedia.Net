@@ -51,9 +51,6 @@ public partial class AntMediaVideoViewHandler : ViewHandler<AntMediaVideoView, S
 /// <summary>
 /// iOS half, shared with Mac Catalyst: the facade's SetLocalView/SetRemoteView take a plain UIView
 /// and add their own renderer inside it, so there is nothing SDK-specific to create here.
-///
-/// On Mac Catalyst the view is real and lays out normally — UIKit is present there — but no video
-/// ever arrives, because Ant Media publishes no Catalyst build of its WebRTC framework.
 /// </summary>
 public partial class AntMediaVideoViewHandler : ViewHandler<AntMediaVideoView, UIView>
 {
