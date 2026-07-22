@@ -1,10 +1,10 @@
 using Android.App;
-using IO.Antmedia.Webrtcandroidframework.Api;
+using AntMedia.WebRTC.Api;
 using Org.Webrtc;
 
-// The SDK has a WebRTCClient in both io.antmedia.webrtcandroidframework.api and .core; the one
-// WebRTCClientBuilder.Build() returns is the core type.
-using WebRTCClient = IO.Antmedia.Webrtcandroidframework.Core.WebRTCClient;
+// The SDK has a WebRTCClient in both AntMedia.WebRTC.Api and AntMedia.WebRTC.Core; the one
+// WebRTCClientBuilder.Build() returns is the Core type.
+using WebRTCClient = AntMedia.WebRTC.Core.WebRTCClient;
 
 namespace AntMedia.Net.Sample.Streaming;
 

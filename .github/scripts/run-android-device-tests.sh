@@ -44,13 +44,41 @@ printf '{ "sdk": { "version": "%s", "rollForward": "latestFeature" } }\n' "${sdk
 # version repeatedly and test yesterday's bits without this.
 rm -rf "${HOME}/.nuget/packages/antmedia.net.android/${VERSION}"
 
-echo "==> installing device tests (version=${VERSION}, tfm=${TARGET_FRAMEWORK}, sdk=${sdk_version})"
-( cd "${SDK_DIR}" && dotnet build "${PROJECT}" \
-    --configuration Release \
-    -p:AntMediaPackageVersion="${VERSION}" \
-    -p:AntMediaDeviceTargetFramework="${TARGET_FRAMEWORK}" \
-    -p:RuntimeIdentifier="${DEVICE_RID}" \
-    -t:Install )
+TRIMMING="${ANTMEDIA_TRIMMING:-none}"
+
+echo "==> installing device tests (version=${VERSION}, tfm=${TARGET_FRAMEWORK}, sdk=${sdk_version}, trimming=${TRIMMING})"
+
+if [ "${TRIMMING}" = "none" ]; then
+    ( cd "${SDK_DIR}" && dotnet build "${PROJECT}" \
+        --configuration Release \
+        -p:AntMediaPackageVersion="${VERSION}" \
+        -p:AntMediaDeviceTargetFramework="${TARGET_FRAMEWORK}" \
+        -p:AntMediaTrimming="${TRIMMING}" \
+        -p:RuntimeIdentifier="${DEVICE_RID}" \
+        -t:Install )
+else
+    # PublishTrimmed is honoured on publish, not on build: `dotnet build -t:Install` produces an
+    # untrimmed APK whatever the property says, so asking for trimming and then using the build
+    # path would report a pass without the linker ever having run over the binding. Publishing
+    # produces the trimmed, signed APK, which adb then installs.
+    ( cd "${SDK_DIR}" && dotnet publish "${PROJECT}" \
+        --configuration Release \
+        -f "${TARGET_FRAMEWORK}" \
+        -p:AntMediaPackageVersion="${VERSION}" \
+        -p:AntMediaDeviceTargetFramework="${TARGET_FRAMEWORK}" \
+        -p:AntMediaTrimming="${TRIMMING}" \
+        -p:RuntimeIdentifier="${DEVICE_RID}" )
+
+    APK="$(find "$(dirname "${PROJECT}")/bin/Release/${TARGET_FRAMEWORK}/${DEVICE_RID}/publish" \
+        -name '*-Signed.apk' | head -1)"
+    if [ -z "${APK}" ]; then
+        echo "::error::publish succeeded but no signed APK was produced" >&2
+        exit 1
+    fi
+
+    echo "==> installing ${APK}"
+    adb install -r "${APK}"
+fi
 
 echo "==> launching"
 adb logcat -c

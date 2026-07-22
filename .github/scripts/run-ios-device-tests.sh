@@ -67,6 +67,7 @@ echo "==> building device tests (version=${VERSION}, tfm=${TARGET_FRAMEWORK}, ri
     -f "${TARGET_FRAMEWORK}" \
     -p:AntMediaPackageVersion="${VERSION}" \
     -p:AntMediaDeviceTargetFramework="${TARGET_FRAMEWORK}" \
+    -p:AntMediaTrimming="${ANTMEDIA_TRIMMING:-none}" \
     -p:RuntimeIdentifier="${DEVICE_RID}" )
 
 APP="$(find "$(dirname "${PROJECT}")/bin/${CONFIGURATION}/${TARGET_FRAMEWORK}/${DEVICE_RID}" \

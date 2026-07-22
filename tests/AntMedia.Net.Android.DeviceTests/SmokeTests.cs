@@ -1,5 +1,5 @@
 using Android.Content;
-using IO.Antmedia.Webrtcandroidframework.Api;
+using AntMedia.WebRTC.Api;
 using Org.Webrtc;
 
 namespace AntMedia.Net.Android.DeviceTests;

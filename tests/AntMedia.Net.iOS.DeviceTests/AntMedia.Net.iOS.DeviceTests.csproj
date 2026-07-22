@@ -36,11 +36,22 @@
     <SupportedOSPlatformVersion>13.0</SupportedOSPlatformVersion>
 
     <!--
-      The point of this app is to prove the *packaged* binding works, so nothing may be trimmed
-      away on the grounds that the test code does not statically reach it. iOS rejects
-      PublishTrimmed=false outright; MtouchLink=None is how it spells the same intent.
+      Trimming is the interesting variable here, so it is a switch rather than a fixed setting.
+      Default off: the app's job is to prove the *packaged* binding works, and a type stripped
+      because the test code never statically reaches it would be a false failure.
+      -p:AntMediaTrimming=true runs the same tests the way a consumer's Release build ships,
+      which is the only configuration that exercises the linker against the binding.
+      iOS rejects PublishTrimmed=false outright; MtouchLink is how it spells the same intent.
     -->
-    <MtouchLink>None</MtouchLink>
+    <!--
+      none  what a Debug build does, and the default here
+      sdk   what a consumer's Release build does by default: the BCL is trimmed, the binding is not
+      full  the aggressive case, where the linker may strip binding members nothing statically calls
+    -->
+    <AntMediaTrimming Condition=" '$(AntMediaTrimming)' == '' ">none</AntMediaTrimming>
+    <MtouchLink Condition=" '$(AntMediaTrimming)' == 'none' ">None</MtouchLink>
+    <MtouchLink Condition=" '$(AntMediaTrimming)' == 'sdk' ">SdkOnly</MtouchLink>
+    <MtouchLink Condition=" '$(AntMediaTrimming)' == 'full' ">Full</MtouchLink>
 
     <!-- Simulator builds are never signed; the runner installs the .app with simctl. -->
     <CodesignKey Condition=" $(RuntimeIdentifier.StartsWith('iossimulator')) "></CodesignKey>
@@ -50,8 +61,12 @@
     <!--
       The packed .nupkg from artifacts/ (exposed by NuGet.config), never the binding project:
       the e2e has to run against exactly what would be published.
+
+      Exact version, in brackets. A bare version is a *minimum* to NuGet, so a missing local
+      build is silently satisfied from nuget.org and the smoke test then passes against the
+      last released package instead of the one under test.
     -->
-    <PackageReference Include="AntMedia.Net.iOS" Version="$(AntMediaPackageVersion)" />
+    <PackageReference Include="AntMedia.Net.iOS" Version="[$(AntMediaPackageVersion)]" />
   </ItemGroup>
 
   <Target Name="ValidateAntMediaPackageVersion" BeforeTargets="Restore;Build"
