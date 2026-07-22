@@ -19,11 +19,12 @@ native/
   android/overlay/           files copied over the upstream checkout before building
   ios/fetch-ios.sh           builds WebRTCiOSSDK.xcframework with our @objc facade
   ios/Facade/                the @objc facade compiled into the iOS framework
-  ios/add-facade.rb          adds the facade to the upstream Xcode target
+  ios/add-facade.py          adds the facade to the upstream Xcode target
   build/                     upstream checkouts and intermediates (git-ignored)
-src/                         the binding projects and the metapackage
+src/                         the binding projects, the cross-platform client and the MAUI package
 tests/                       package validation + on-device smoke tests
 samples/                     the MAUI sample app
+assets/                      the package icon
 AntMedia.Net.sln             every project above
 ```
 
@@ -98,7 +99,10 @@ Two details are load-bearing and easy to undo by accident:
   them as `NativeReference` in the consuming project from
   [`build/AntMedia.Net.iOS.targets`](../src/AntMedia.Net.iOS/build/AntMedia.Net.iOS.targets).
 
-Requires macOS with Xcode and the `xcodeproj` Ruby gem (installed by the script if missing).
+Requires macOS with Xcode. Nothing else is installed: the one fiddly part, adding the facade to
+the upstream Xcode target, is done by [`add-facade.py`](../native/ios/add-facade.py) using `plutil`
+and Python's `plistlib` rather than Ruby's `xcodeproj` gem — `project.pbxproj` is a property list,
+and Xcode reads it back happily in XML form.
 
 ```sh
 ./native/ios/fetch-ios.sh                      # the pinned commit
