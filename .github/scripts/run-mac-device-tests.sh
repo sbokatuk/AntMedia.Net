@@ -13,9 +13,18 @@ set -euo pipefail
 VERSION="${1:?a package version is required}"
 TARGET_FRAMEWORK="${2:-net10.0-maccatalyst26.0}"
 
-# Absolute, because `open` resolves --stdout and --stderr relative to its own working directory
-# rather than the caller's and fails the launch with a bare "-10810" if it cannot.
-LOG_FILE="${PWD}/device-tests-maccatalyst.log"
+# Where the log ends up, for the caller and for CI's artifact upload.
+LOG_FILE="device-tests-maccatalyst.log"
+
+# Where the app actually writes it. `open --stdout` hands the descriptor over through
+# LaunchServices, which cannot open a path inside a TCC-protected directory - Documents, Desktop,
+# Downloads - and fails the whole launch with a bare
+#
+#     _LSOpenURLsWithCompletionHandler() failed with error -10810.
+#
+# that says nothing about the log file. A clone under ~/Documents is enough to hit it, so the app
+# writes to a temp file and it is copied out at the end.
+LAUNCH_LOG="$(mktemp -t antmedia-mac-e2e)"
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PROJECT="${REPO_ROOT}/tests/AntMedia.Net.Mac.DeviceTests/AntMedia.Net.Mac.DeviceTests.csproj"
@@ -42,7 +51,7 @@ if [ -z "${sdk_version}" ]; then
 fi
 
 SDK_DIR="$(mktemp -d)"
-trap 'rm -rf "${SDK_DIR}"' EXIT
+trap 'rm -rf "${SDK_DIR}" "${LAUNCH_LOG}"' EXIT
 printf '{ "sdk": { "version": "%s", "rollForward": "latestFeature" } }\n' "${sdk_version}" \
     > "${SDK_DIR}/global.json"
 
@@ -70,8 +79,6 @@ if [ -z "${APP}" ]; then
 fi
 echo "==> built ${APP}"
 
-: > "${LOG_FILE}"
-
 # Launched through LaunchServices rather than exec'd directly, and that is load-bearing when
 # ANTMEDIA_TEST_SERVER is set: macOS only shows the camera and microphone prompts for an app it
 # launched, and a binary started from a shell inherits the terminal's (absent) grants instead. The
@@ -81,15 +88,15 @@ echo "==> built ${APP}"
 echo "==> launching"
 open -n \
     ${ANTMEDIA_TEST_SERVER:+--env ANTMEDIA_TEST_SERVER="${ANTMEDIA_TEST_SERVER}"} \
-    --stdout "${LOG_FILE}" \
-    --stderr "${LOG_FILE}" \
+    --stdout "${LAUNCH_LOG}" \
+    --stderr "${LAUNCH_LOG}" \
     "${APP}"
 
 BINARY="${APP}/Contents/MacOS/$(basename "${APP}" .app)"
 
 for _ in $(seq 1 60); do
     sleep 5
-    grep -q "ANTMEDIA_E2E_DONE" "${LOG_FILE}" && break
+    grep -q "ANTMEDIA_E2E_DONE" "${LAUNCH_LOG}" && break
     if ! pgrep -f "${BINARY}" > /dev/null; then
         echo "==> the app exited without printing a verdict"
         break
@@ -98,6 +105,7 @@ done
 
 pkill -f "${BINARY}" 2>/dev/null || true
 
+cp "${LAUNCH_LOG}" "${LOG_FILE}"
 cat "${LOG_FILE}"
 
 if ! grep -q "ANTMEDIA_E2E_DONE PASS" "${LOG_FILE}"; then
