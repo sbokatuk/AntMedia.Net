@@ -459,12 +459,14 @@ jobs:
           disable-animations: true
           # 10.0.2.2 is the emulator's route to the runner host, where the service container's
           # port 5080 is published.
+          # One line, no continuation: the action hands each line to `sh -c` separately, so a
+          # trailing backslash is run as a command of its own and the step dies with
+          # "/usr/bin/sh: 1: \: not found" and exit 127.
+          #
           # LiveApp, not WebRTCAppEE: that is the Enterprise edition's application name and it 404s
           # on the community image, which produces a publish timeout and an empty server log
           # rather than anything that points at the URL.
-          script: |
-            ANTMEDIA_TEST_SERVER="ws://10.0.2.2:5080/LiveApp/websocket" \
-              ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
+          script: ANTMEDIA_TEST_SERVER="ws://10.0.2.2:5080/LiveApp/websocket" ./.github/scripts/run-android-device-tests.sh "${{ inputs.version }}" "${{ inputs.e2e-android-target-framework }}"
 
       - name: Upload device logs
         if: always()
