@@ -111,11 +111,6 @@ public static class Packages
 
     private static string ResolveArtifactsDirectory()
     {
-        if (Environment.GetEnvironmentVariable("ANTMEDIA_ARTIFACTS") is { Length: > 0 } configured)
-        {
-            return Path.GetFullPath(configured);
-        }
-
         // Walk up to the repository root (the directory holding global.json).
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "global.json")))
@@ -123,6 +118,14 @@ public static class Packages
             directory = directory.Parent;
         }
 
-        return Path.Combine(directory?.FullName ?? AppContext.BaseDirectory, "artifacts");
+        var root = directory?.FullName ?? AppContext.BaseDirectory;
+
+        // A relative ANTMEDIA_ARTIFACTS is resolved against the repository root, not the current
+        // directory. The test process runs from bin/<config>/<tfm>, so the obvious-looking
+        // ANTMEDIA_ARTIFACTS=artifacts would otherwise point at a directory inside the build
+        // output and report every package as missing.
+        return Environment.GetEnvironmentVariable("ANTMEDIA_ARTIFACTS") is { Length: > 0 } configured
+            ? Path.GetFullPath(configured, root)
+            : Path.Combine(root, "artifacts");
     }
 }

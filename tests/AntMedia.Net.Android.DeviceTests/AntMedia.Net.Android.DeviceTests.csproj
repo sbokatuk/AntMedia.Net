@@ -48,8 +48,12 @@
     <!--
       The packed .nupkg from artifacts/ (exposed by NuGet.config), never the binding project:
       the e2e has to run against exactly what would be published.
+
+      Exact version, in brackets. A bare version is a *minimum* to NuGet, so a missing local
+      build is silently satisfied from nuget.org and the smoke test then passes against the
+      last released package instead of the one under test.
     -->
-    <PackageReference Include="AntMedia.Net.Android" Version="$(AntMediaPackageVersion)" />
+    <PackageReference Include="AntMedia.Net.Android" Version="[$(AntMediaPackageVersion)]" />
   </ItemGroup>
 
   <Target Name="ValidateAntMediaPackageVersion" BeforeTargets="Restore;Build"

@@ -10,11 +10,11 @@ public class BindingApiTests
     /// <summary>Types the Android binding must expose for the SDK to be usable at all.</summary>
     private static readonly string[] AndroidCoreTypes =
     [
-        "IO.Antmedia.Webrtcandroidframework.Api.IWebRTCClient",
-        "IO.Antmedia.Webrtcandroidframework.Api.IWebRTCListener",
-        "IO.Antmedia.Webrtcandroidframework.Api.DefaultWebRTCListener",
-        "IO.Antmedia.Webrtcandroidframework.Api.WebRTCClientBuilder",
-        "IO.Antmedia.Webrtcandroidframework.Core.WebRTCClient",
+        "AntMedia.WebRTC.Api.IWebRTCClient",
+        "AntMedia.WebRTC.Api.IWebRTCListener",
+        "AntMedia.WebRTC.Api.DefaultWebRTCListener",
+        "AntMedia.WebRTC.Api.WebRTCClientBuilder",
+        "AntMedia.WebRTC.Core.WebRTCClient",
         // org.webrtc is vendored inside the same .aar, and the renderer views are what a MAUI app
         // actually puts on screen, so their absence would make the package useless in practice.
         "Org.Webrtc.SurfaceViewRenderer",
@@ -73,7 +73,7 @@ public class BindingApiTests
     {
         using var api = OpenBinding(Packages.Android, "AntMedia.Net.Android", tfm);
 
-        var methods = api.MethodsOf("IO.Antmedia.Webrtcandroidframework.Api.IWebRTCListener");
+        var methods = api.MethodsOf("AntMedia.WebRTC.Api.IWebRTCListener");
 
         // Transforms/Metadata.xml renames the two-argument onNewVideoTrack overload, because both
         // overloads otherwise generate the same handler field and the binding does not compile.

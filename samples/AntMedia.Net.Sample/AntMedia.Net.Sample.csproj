@@ -57,8 +57,13 @@
     <!--
       The metapackage resolves to AntMedia.Net.Android or AntMedia.Net.iOS depending on which
       target framework is being built.
+
+      Exact version, in brackets. A bare version is a *minimum* to NuGet, so when the requested
+      build is missing from artifacts/ it silently satisfies the reference from nuget.org instead —
+      which means the sample can appear to build against local changes while actually compiling
+      against the last published release. Pinning turns that into an unambiguous restore error.
     -->
-    <PackageReference Include="AntMedia.Net" Version="$(AntMediaPackageVersion)" />
+    <PackageReference Include="AntMedia.Net" Version="[$(AntMediaPackageVersion)]" />
   </ItemGroup>
 
 </Project>
