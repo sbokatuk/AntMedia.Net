@@ -17,9 +17,8 @@
     <IsBindingProject>true</IsBindingProject>
     <!--
       The xcframeworks are dynamic, so they cannot be embedded into this assembly and linked from
-      there — the consuming app's linker never sees them and fails on undefined _OBJC_CLASS_$_*
-      symbols. They ship as package content instead and are declared as NativeReference in the
-      consuming project by build/AntMedia.Net.iOS.targets.
+      there — the consuming app's linker never sees them. They travel beside the assembly instead;
+      see the NativeReference block below.
     -->
     <NoBindingEmbedding>true</NoBindingEmbedding>
 
@@ -41,6 +40,28 @@
     <ObjcBindingApiDefinition Include="ApiDefinition.cs" />
     <ObjcBindingCoreSource Include="StructsAndEnums.cs" />
   </ItemGroup>
+
+  <!--
+    How the frameworks reach the consuming app.
+
+    Both are *dynamic* frameworks, so they cannot be linked into this assembly: they have to be
+    present when the app itself is linked and bundled, or the build fails with
+
+        Undefined symbols for architecture arm64:
+          "_OBJC_CLASS_$_AMSClient", referenced from: <initial-undefines>
+
+    because the registrar passes -u for every bound Objective-C class while nothing supplies them.
+
+    Declaring them as NativeReference here is what handles that. With NoBindingEmbedding the
+    frameworks are packed beside the assembly as <name>.resources.zip, once per target framework,
+    and the Apple SDK unpacks and links them in whichever app references this package - directly
+    or transitively.
+
+    A package-level build/<id>.targets that re-declared them in the consuming project would be
+    smaller, since it needs only one copy. It does not work: NuGet's default PrivateAssets hides
+    'build' assets from transitive consumers, so an app that gets here through AntMedia.Net.Maui ->
+    AntMedia.Net would never import it, and would fail with exactly the error above.
+  -->
 
   <ItemGroup>
     <!--
@@ -74,15 +95,6 @@
     <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
 
-    <!--
-      The xcframeworks travel as package content, not inside the assembly, and the .targets below
-      wires them into the consuming project. Packed once at the package root rather than per
-      target framework: they are ~28 MB and identical for all three.
-    -->
-    <None Include="lib/WebRTCiOSSDK.xcframework/**" Pack="true" PackagePath="native/WebRTCiOSSDK.xcframework/" Visible="false" />
-    <None Include="lib/WebRTC.xcframework/**" Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
-
-    <None Include="build/AntMedia.Net.iOS.targets" Pack="true" PackagePath="build/" Visible="false" />
   </ItemGroup>
 
 </Project>

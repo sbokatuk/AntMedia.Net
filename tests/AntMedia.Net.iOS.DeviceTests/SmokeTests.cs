@@ -1,10 +1,16 @@
+#if MACCATALYST
+using AntMedia.Net.Mac;
+#else
 using AntMedia.Net.iOS;
+#endif
 using Foundation;
 
-namespace AntMedia.Net.IOS.DeviceTests;
+namespace AntMedia.Net.Apple.DeviceTests;
 
 /// <summary>
-/// Offline checks that the packaged binding actually works on a simulator.
+/// Offline checks that the packaged binding actually works on the device it is built for —
+/// an iOS simulator, or Mac Catalyst. One file, both packages: the two bindings are generated
+/// from one ApiDefinition and differ only in namespace.
 ///
 /// They stop short of connecting to a server: a real publish/play round-trip needs a running Ant
 /// Media Server, which CI does not have. What is proven here is the part a desktop package test

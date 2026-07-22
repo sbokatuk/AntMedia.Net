@@ -11,14 +11,14 @@ namespace AntMedia.Net.PackageTests;
 public class MetapackageTests
 {
     /// <summary>
-    /// Which binding each target framework must pull in. Mac Catalyst maps to null on purpose:
-    /// the group exists so the package can be referenced there, but shipping the iOS binding with
-    /// it would drag 28 MB of iOS-only xcframeworks into an app that cannot use them.
+    /// Which binding each target framework must pull in. Catalyst takes AntMedia.Net.Mac rather
+    /// than AntMedia.Net.iOS: the managed surface is the same, but the native payload underneath
+    /// is a different build, and the iOS one has no Catalyst slice.
     /// </summary>
     private static readonly Dictionary<string, string?> ExpectedDependency =
         Packages.AndroidTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.Android)
             .Concat(Packages.IosTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.IOS))
-            .Concat(Packages.MacCatalystTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)null))
+            .Concat(Packages.MacCatalystTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.Mac))
             .ToDictionary(pair => pair.Key, pair => pair.Value);
 
     private static Dictionary<string, XElement> DependencyGroups()

@@ -23,12 +23,13 @@ public class BindingApiTests
     ];
 
     /// <summary>Types the iOS binding must expose. All come from our @objc facade.</summary>
-    private static readonly string[] IosCoreTypes =
+    /// <summary>
+    /// The facade's types, without the namespace: the same ApiDefinition produces
+    /// AntMedia.Net.iOS on iOS and AntMedia.Net.Mac on Catalyst.
+    /// </summary>
+    private static readonly string[] AppleCoreTypes =
     [
-        "AntMedia.Net.iOS.AMSClient",
-        "AntMedia.Net.iOS.AMSClientDelegate",
-        "AntMedia.Net.iOS.IAMSClientDelegate",
-        "AntMedia.Net.iOS.AMSStreamInformation",
+        "AMSClient", "AMSClientDelegate", "IAMSClientDelegate", "AMSStreamInformation",
     ];
 
     private static AssemblyApi OpenBinding(string packageId, string assemblyName, string tfm)
@@ -83,31 +84,44 @@ public class BindingApiTests
         Assert.Contains("OnNewVideoTrackWithId", methods);
     }
 
+    /// <summary>
+    /// The two Apple bindings, each with its own target frameworks and its own namespace. They are
+    /// generated from one ApiDefinition, so anything true of one must be true of the other — which
+    /// is exactly why the checks below run over both rather than over iOS alone.
+    /// </summary>
+    public static IEnumerable<object[]> AppleBindings =>
+        Packages.IosTargetFrameworks
+            .Select(tfm => new object[] { Packages.IOS, "AntMedia.Net.iOS", tfm })
+            .Concat(Packages.MacCatalystTargetFrameworks
+                .Select(tfm => new object[] { Packages.Mac, "AntMedia.Net.Mac", tfm }));
+
     [SkippableTheory]
-    [MemberData(nameof(Packages.IosFrameworks), MemberType = typeof(Packages))]
-    public void Ios_binding_exposes_the_facade_types(string tfm)
+    [MemberData(nameof(AppleBindings))]
+    public void Apple_binding_exposes_the_facade_types(string packageId, string ns, string tfm)
     {
-        Skip.IfNot(Packages.Exists(Packages.IOS), "the iOS package is only built on macOS");
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        using var api = OpenBinding(Packages.IOS, "AntMedia.Net.iOS", tfm);
+        using var api = OpenBinding(packageId, packageId, tfm);
 
-        var missing = IosCoreTypes.Except(api.PublicTypes).ToList();
+        var missing = AppleCoreTypes.Select(name => $"{ns}.{name}")
+            .Except(api.PublicTypes)
+            .ToList();
 
         Assert.True(
             missing.Count == 0,
-            $"{Packages.IOS} ({tfm}) is missing bound types: {string.Join(", ", missing)}. " +
+            $"{packageId} ({tfm}) is missing bound types: {string.Join(", ", missing)}. " +
             $"The assembly exposes {api.PublicTypes.Count} public types in total.");
     }
 
     [SkippableTheory]
-    [MemberData(nameof(Packages.IosFrameworks), MemberType = typeof(Packages))]
-    public void Ios_client_exposes_the_session_entry_points(string tfm)
+    [MemberData(nameof(AppleBindings))]
+    public void Apple_client_exposes_the_session_entry_points(string packageId, string ns, string tfm)
     {
-        Skip.IfNot(Packages.Exists(Packages.IOS), "the iOS package is only built on macOS");
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        using var api = OpenBinding(Packages.IOS, "AntMedia.Net.iOS", tfm);
+        using var api = OpenBinding(packageId, packageId, tfm);
 
-        var methods = api.MethodsOf("AntMedia.Net.iOS.AMSClient");
+        var methods = api.MethodsOf($"{ns}.AMSClient");
 
         // These exist only because native/ios/Facade is compiled into the framework. Against the
         // xcframework Ant Media ships, AMSClient would not exist at all and the binding would be
@@ -123,14 +137,15 @@ public class BindingApiTests
     }
 
     [SkippableTheory]
-    [MemberData(nameof(Packages.IosFrameworks), MemberType = typeof(Packages))]
-    public void Ios_delegate_exposes_the_stream_lifecycle_callbacks(string tfm)
+    [MemberData(nameof(AppleBindings))]
+    public void Apple_delegate_exposes_the_stream_lifecycle_callbacks(
+        string packageId, string ns, string tfm)
     {
-        Skip.IfNot(Packages.Exists(Packages.IOS), "the iOS package is only built on macOS");
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        using var api = OpenBinding(Packages.IOS, "AntMedia.Net.iOS", tfm);
+        using var api = OpenBinding(packageId, packageId, tfm);
 
-        var methods = api.MethodsOf("AntMedia.Net.iOS.AMSClientDelegate");
+        var methods = api.MethodsOf($"{ns}.AMSClientDelegate");
 
         foreach (var member in new[]
                  {

@@ -5,7 +5,7 @@ namespace AntMedia.Net.Sample;
 
 /// <summary>
 /// Publishes and plays a stream. The whole app is this one file — there is no per-platform code,
-/// because <c>AntMedia.Net</c> presents the same client on Android and iOS and
+/// because <c>AntMedia.Net</c> presents the same client on Android, iOS and Mac Catalyst and
 /// <c>AntMedia.Net.Maui</c> supplies the video view and the Android <c>Activity</c>.
 /// </summary>
 public partial class MainPage : ContentPage
@@ -97,13 +97,6 @@ public partial class MainPage : ContentPage
         catch (AntMediaException exception)
         {
             Append($"failed to start: {exception.Message}");
-            SetStreaming(false);
-        }
-        catch (PlatformNotSupportedException exception)
-        {
-            // Mac Catalyst. The app runs and the UI works, but there is no Ant Media framework to
-            // stream with, so say so plainly rather than letting it crash.
-            Append(exception.Message);
             SetStreaming(false);
         }
         finally

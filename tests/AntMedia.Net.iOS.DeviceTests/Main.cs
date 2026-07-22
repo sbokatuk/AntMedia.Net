@@ -1,7 +1,7 @@
 using Foundation;
 using UIKit;
 
-namespace AntMedia.Net.IOS.DeviceTests;
+namespace AntMedia.Net.Apple.DeviceTests;
 
 public static class Application
 {
@@ -11,8 +11,9 @@ public static class Application
 /// <summary>
 /// Runs the smoke tests once the app has launched, prints the verdict to stdout and exits.
 /// .github/scripts/run-ios-device-tests.sh launches the app with `simctl launch --console-pty`,
-/// which streams stdout and returns when the process ends — so exiting here is what ends the CI
-/// step, and the marker strings are part of the contract with that script.
+/// and run-mac-device-tests.sh runs the Mac Catalyst build straight from the shell; both stream
+/// stdout and return when the process ends — so exiting here is what ends the step, and the
+/// marker strings are part of the contract with those scripts.
 /// </summary>
 [Register(nameof(AppDelegate))]
 public class AppDelegate : UIApplicationDelegate
@@ -30,9 +31,10 @@ public class AppDelegate : UIApplicationDelegate
         return true;
     }
 
-    private static void RunSmokeTests()
+    private static async void RunSmokeTests()
     {
         var failures = 0;
+        var checks = SmokeTests.All.Count;
 
         foreach (var (name, run) in SmokeTests.All)
         {
@@ -50,9 +52,32 @@ public class AppDelegate : UIApplicationDelegate
             }
         }
 
+        // Only when a server was supplied. Most runs have none, and a skipped live check must not
+        // read as a passed one — hence SKIP on its own line rather than silence.
+        var serverUrl = Environment.GetEnvironmentVariable("ANTMEDIA_TEST_SERVER");
+
+        if (string.IsNullOrWhiteSpace(serverUrl))
+        {
+            Console.WriteLine("SKIP live publish (no ANTMEDIA_TEST_SERVER)");
+        }
+        else
+        {
+            checks++;
+            try
+            {
+                Console.WriteLine($"    {await LiveStreamTest.RunAsync(serverUrl)}");
+                Console.WriteLine("PASS live publish");
+            }
+            catch (Exception exception)
+            {
+                failures++;
+                Console.WriteLine($"FAIL live publish: {exception}");
+            }
+        }
+
         Console.WriteLine(failures == 0
-            ? $"{DoneMarker} PASS ({SmokeTests.All.Count} checks)"
-            : $"{DoneMarker} FAIL ({failures} of {SmokeTests.All.Count} checks failed)");
+            ? $"{DoneMarker} PASS ({checks} checks)"
+            : $"{DoneMarker} FAIL ({failures} of {checks} checks failed)");
 
         Console.Out.Flush();
         Environment.Exit(failures == 0 ? 0 : 1);

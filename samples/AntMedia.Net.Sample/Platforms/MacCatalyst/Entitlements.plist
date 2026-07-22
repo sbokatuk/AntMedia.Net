@@ -7,5 +7,13 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+
+	<!-- Publishing captures from the camera and microphone. Unlike iOS, a sandboxed Catalyst app
+	     needs these entitlements as well as the Info.plist usage descriptions: without them the
+	     capture device simply never delivers frames, with no permission prompt and no error. -->
+	<key>com.apple.security.device.camera</key>
+	<true/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>

@@ -141,11 +141,17 @@ mkdir -p "${DESTINATION}"
 rm -rf "${DESTINATION}/${SCHEME}.xcframework" "${DESTINATION}/WebRTC.xcframework"
 cp -R "${WORK_DIR}/${SCHEME}.xcframework" "${DESTINATION}/"
 
-# Only the Catalyst slice: the iOS ones come from Ant Media's own build, in the iOS package, and
-# shipping a second copy of libwebrtc for platforms this package does not serve would add ~40 MB
-# for nothing.
+# Only the Catalyst slice, and only its arm64 half: the iOS slices come from Ant Media's own build
+# in the iOS package, and x86_64 Catalyst cannot be supported at all (see ARCHS above). Shipping
+# either would be tens of megabytes in every consuming app for something nothing can link against.
 python3 "${SCRIPT_DIR}/strip-slices.py" \
-    "${WEBRTC_DIR}/WebRTC.xcframework" "${DESTINATION}/WebRTC.xcframework" maccatalyst
+    "${WEBRTC_DIR}/WebRTC.xcframework" "${DESTINATION}/WebRTC.xcframework" maccatalyst arm64
+
+# NuGet packages cannot carry symlinks, and the macOS versioned framework layout is mostly
+# symlinks - see flatten-frameworks.py for what that does to the consuming app's build.
+for framework in "${DESTINATION}"/*.xcframework; do
+    python3 "${SCRIPT_DIR}/flatten-frameworks.py" "${framework}"
+done
 
 cat > "${WORK_DIR}/pin.txt" <<EOF
 commit=$(git -C "${CHECKOUT}" rev-parse HEAD)

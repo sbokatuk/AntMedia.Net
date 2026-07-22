@@ -37,52 +37,96 @@ public class PackageLayoutTests
     }
 
     [SkippableTheory]
-    [MemberData(nameof(Packages.IosFrameworks), MemberType = typeof(Packages))]
-    public void Ios_package_carries_a_binding_assembly_for_every_target_framework(string tfm)
+    [MemberData(nameof(ApplePackagesAndFrameworks))]
+    public void Apple_packages_carry_a_binding_assembly_for_every_target_framework(
+        string packageId, string tfm)
     {
-        Skip.IfNot(Packages.Exists(Packages.IOS), "the iOS package is only built on macOS");
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        using var package = Packages.OpenPackage(Packages.IOS);
+        using var package = Packages.OpenPackage(packageId);
 
-        var assembly = package.GetEntry($"lib/{tfm}/AntMedia.Net.iOS.dll");
-        Assert.True(assembly is not null, $"{Packages.IOS} is missing the assembly for {tfm}.");
+        var assembly = package.GetEntry($"lib/{tfm}/{packageId}.dll");
+        Assert.True(assembly is not null, $"{packageId} is missing the assembly for {tfm}.");
+    }
+
+    public static IEnumerable<object[]> ApplePackagesAndFrameworks =>
+        Packages.IosTargetFrameworks.Select(tfm => new object[] { Packages.IOS, tfm })
+            .Concat(Packages.MacCatalystTargetFrameworks.Select(tfm => new object[] { Packages.Mac, tfm }));
+
+    [SkippableTheory]
+    [MemberData(nameof(ApplePackagesAndFrameworks))]
+    public void Apple_packages_ship_the_xcframeworks_beside_every_binding_assembly(
+        string packageId, string tfm)
+    {
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
+
+        // Both xcframeworks are dynamic, so they cannot be linked into the binding assembly: the
+        // consuming app's linker would never see them and would fail on undefined
+        // _OBJC_CLASS_$_AMSClient. With NoBindingEmbedding they travel beside the assembly, which
+        // is what the Apple SDK unpacks and links in the consuming app - directly or
+        // transitively. If it goes missing, every consumer breaks at link time, which no other
+        // test here would catch.
+        var names = Packages.NativePayload(packageId, tfm);
+
+        Assert.True(
+            names.Count > 0,
+            $"{packageId} carries no native payload for {tfm}. Without it the frameworks never " +
+            "reach the consuming app.");
+
+        foreach (var framework in new[] { "WebRTCiOSSDK", "WebRTC" })
+        {
+            Assert.Contains(names, n => n.Contains($"{framework}.xcframework/", StringComparison.Ordinal));
+        }
     }
 
     [SkippableFact]
-    public void Ios_package_ships_the_xcframeworks_and_wires_them_up()
+    public void Ios_package_carries_both_a_device_and_a_simulator_slice()
     {
         Skip.IfNot(Packages.Exists(Packages.IOS), "the iOS package is only built on macOS");
 
-        using var package = Packages.OpenPackage(Packages.IOS);
+        var names = Packages.NativePayload(Packages.IOS, Packages.IosTargetFrameworks[0]);
 
-        // Both xcframeworks are dynamic, so they cannot be embedded in the binding assembly: the
-        // consuming app's linker would never see them and would fail on undefined
-        // _OBJC_CLASS_$_AMSClient. They ship as package content and build/*.targets declares them
-        // as NativeReference in the consuming project — if either half goes missing, every
-        // consumer breaks at link time, which no other test here would catch.
-        foreach (var framework in new[] { "WebRTCiOSSDK", "WebRTC" })
-        {
-            var slices = package.Entries
-                .Where(e => e.FullName.StartsWith($"native/{framework}.xcframework/", StringComparison.Ordinal))
-                .ToList();
+        // Both, or the package works in exactly one of the two places a developer will try it.
+        Assert.Contains(names, n => n.Contains("/ios-arm64/", StringComparison.Ordinal));
+        Assert.Contains(names, n => n.Contains("-simulator/", StringComparison.Ordinal));
+    }
 
-            Assert.True(slices.Count > 0, $"{Packages.IOS} does not ship native/{framework}.xcframework.");
+    [SkippableFact]
+    public void Mac_package_carries_an_arm64_catalyst_slice_and_nothing_else()
+    {
+        Skip.IfNot(Packages.Exists(Packages.Mac), "the Mac package is only built on macOS");
 
-            // Device and simulator slices both have to be there, or the package works in exactly
-            // one of the two places a developer will try it.
-            Assert.Contains(slices, e => e.FullName.Contains("/ios-arm64/", StringComparison.Ordinal));
-            Assert.Contains(slices, e => e.FullName.Contains("-simulator/", StringComparison.Ordinal));
-        }
+        var slices = Packages.NativePayload(Packages.Mac, Packages.MacCatalystTargetFrameworks[0])
+            .Where(n => n.Contains(".xcframework/", StringComparison.Ordinal))
+            .Select(n => n.Split(".xcframework/")[1].Split('/')[0])
+            .Where(s => s.Length > 0 && !s.EndsWith(".plist", StringComparison.Ordinal))
+            .Distinct()
+            .ToList();
 
-        var targets = package.GetEntry($"build/{Packages.IOS}.targets");
-        Assert.True(targets is not null, $"{Packages.IOS} is missing build/{Packages.IOS}.targets.");
+        // arm64 Catalyst only: Ant Media renders through OpenGL when arch != arm64 and Catalyst
+        // has no OpenGL, and the iOS slices belong to AntMedia.Net.iOS. Anything else here is tens
+        // of megabytes in every consuming app for something nothing can link against.
+        Assert.All(slices, slice =>
+            Assert.True(
+                slice == "ios-arm64-maccatalyst",
+                $"{Packages.Mac} ships the '{slice}' slice; it should carry ios-arm64-maccatalyst only."));
+    }
 
-        using var reader = new StreamReader(targets!.Open());
-        var content = reader.ReadToEnd();
+    [SkippableTheory]
+    [MemberData(nameof(ApplePackagesAndFrameworks))]
+    public void Apple_frameworks_are_shallow_bundles(string packageId, string tfm)
+    {
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        Assert.Contains("NativeReference", content);
-        Assert.Contains("WebRTCiOSSDK.xcframework", content);
-        Assert.Contains("WebRTC.xcframework", content);
+        var names = Packages.NativePayload(packageId, tfm);
+        Skip.If(names.Count == 0, "covered by the payload test");
+
+        // The macOS versioned framework layout is mostly symlinks, and a NuGet package cannot
+        // carry a symlink: each one becomes a real copy, the framework arrives with its content in
+        // two places at once, and the consuming app fails at signing with "bundle format is
+        // ambiguous (could be app or framework)". native/mac/flatten-frameworks.py is what keeps
+        // the Catalyst slices shallow; this is the assertion that would catch its removal.
+        Assert.DoesNotContain(names, n => n.Contains(".framework/Versions/", StringComparison.Ordinal));
     }
 
     public static IEnumerable<object[]> CrossPlatformPackagesAndFrameworks =>
@@ -134,7 +178,10 @@ public class PackageLayoutTests
     [Fact]
     public void Packages_declare_the_expected_nuspec_metadata()
     {
-        foreach (var id in new[] { Packages.Android, Packages.IOS, Packages.Meta, Packages.Maui })
+        foreach (var id in new[]
+                 {
+                     Packages.Android, Packages.IOS, Packages.Mac, Packages.Meta, Packages.Maui,
+                 })
         {
             if (!Packages.Exists(id))
             {

@@ -112,31 +112,48 @@ and Xcode reads it back happily in XML form.
 Both scripts are pin-keyed and idempotent, which is what makes the CI caches safe: the cache key
 is the pin plus a hash of the script inputs, so changing the facade rebuilds the framework.
 
-### Mac Catalyst builds, but does not stream
+### Mac Catalyst
 
-`AntMedia.Net` and `AntMedia.Net.Maui` target Mac Catalyst; the bindings do not. The Catalyst
-assemblies compile and a MAUI app targeting Catalyst launches with a working UI, but constructing
-a client throws `PlatformNotSupportedException`.
+`native/mac/fetch-mac.sh` builds the same Ant Media commit as the iOS script, with the same facade,
+and stages the result for `AntMedia.Net.Mac`.
 
-That exists for one reason: the MAUI project template targets `maccatalyst` by default, and a
-package with no assets for it fails the *entire* restore with `NU1202`. Without these targets,
-adopting AntMedia.Net starts with editing `TargetFrameworks`, and the error says nothing about why.
+```sh
+./native/mac/fetch-mac.sh                      # the pinned commit
+./native/mac/fetch-mac.sh <sha>                # some other commit
+```
 
-Streaming is blocked upstream, not here — we build the Swift SDK ourselves now, so adding a
-Catalyst destination to that would be easy. The blocker is libwebrtc:
+What differs is underneath. Ant Media links a **customised** libwebrtc: their `WebRTC.framework`
+exports `RTCAudioDeviceModule` and ships `RTCAudioDeviceModule.h`, stock builds have neither, and
+they publish theirs for iOS only (`ios-arm64`, `ios-arm64_x86_64-simulator`) without the fork's
+source. So no Catalyst slice can be produced from it.
 
-- Ant Media links a **customised** libwebrtc. Their `WebRTC.framework` exports
-  `RTCAudioDeviceModule` and ships `RTCAudioDeviceModule.h`; stock builds have neither.
-- They publish it for **iOS only** — `ios-arm64` and `ios-arm64_x86_64-simulator` — and do not
-  publish the fork's source.
-- A Catalyst-capable community build exists ([stasel/WebRTC][stasel] M150 has
-  `ios-x86_64_arm64-maccatalyst`), but Ant Media's Swift code does not compile against it:
-  `cannot find type 'RTCAudioDeviceModule' in scope`, and
-  `peerConnectionFactory(encoderFactory:decoderFactory:audioDeviceModule:)` does not exist there.
+This build therefore links a stock community libwebrtc ([stasel/WebRTC][stasel], which ships
+`maccatalyst`) and compiles [`native/mac/Shim`](../native/mac/Shim) beside the facade to supply the
+two things their Swift code expects and stock libwebrtc does not have: `RTCAudioDeviceModule`, and
+the `peerConnectionFactory(encoderFactory:decoderFactory:audioDeviceModule:)` initialiser. Ant
+Media's own source is not patched. The consequence is that **external audio injection is not
+available on Mac** — everything else works, including camera capture, publish and play.
 
-So real Catalyst support needs Ant Media to publish a Catalyst slice, or a fork of their Swift SDK
-moved off their custom audio-device API — which would also move it off whatever that API does for
-echo cancellation and device routing.
+Three build settings do the rest, each load-bearing and each with an unhelpful failure:
+
+| Setting | Without it |
+| --- | --- |
+| `SUPPORTS_MACCATALYST=YES` | `Unable to find a destination matching the provided destination specifier` |
+| `IPHONEOS_DEPLOYMENT_TARGET=14.0` | a dozen `'AVCaptureDevice' is only available in Mac Catalyst 14.0 or newer`. Catalyst derives availability from the *iOS* deployment target; raising `MACOSX_DEPLOYMENT_TARGET` does nothing |
+| `ARCHS=arm64` | undefined `RTCEAGLVideoView` at link time. Ant Media picks its renderer with `#if arch(arm64)` — Metal on arm64, OpenGL otherwise — and Mac Catalyst has no OpenGL |
+
+The last one is why **`AntMedia.Net.Mac` is Apple Silicon only**. A Catalyst app that builds for
+`maccatalyst-x64` fails to link; set `<RuntimeIdentifiers>maccatalyst-arm64</RuntimeIdentifiers>`.
+
+Two post-processing steps run before the frameworks are staged, both in `native/mac`:
+
+- `strip-slices.py` keeps the `maccatalyst` slice and `lipo`s it down to arm64. The stock build
+  ships iOS, simulator, macOS and Catalyst slices as one ~100 MB xcframework, and everything but
+  the arm64 Catalyst slice is weight nothing here can link against.
+- `flatten-frameworks.py` rewrites the macOS versioned framework layout to the shallow one, and
+  rewrites the install names to match. A NuGet package cannot carry a symlink, and the versioned
+  layout is mostly symlinks: each becomes a real copy, and the consuming app then fails to sign
+  with `bundle format is ambiguous (could be app or framework)`.
 
 ## Packing
 

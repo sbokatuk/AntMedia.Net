@@ -98,8 +98,15 @@ EOF
 
 # Packs one project in both SDK bands, then merges the two packages into artifacts/.
 pack_and_merge() {
-    local project="$1" name
+    local project="$1" name directory
     name="$(basename "${project}" .csproj)"
+    directory="$(dirname "${project}")"
+
+    # From clean, every time. An incremental pack of a project that both targets Android and
+    # depends on an Android *binding* package rolls the binding's extracted library projects
+    # (obj/*/lp/**) into this project's own .aar on the second run - which took AntMedia.Net from
+    # 131 KB to 20 MB, silently, and only ever locally, because CI always starts empty.
+    rm -rf "${directory}/obj" "${directory}/bin"
 
     echo "==> packing ${name} (${PASS1_BAND} band)"
     dotnet pack "${project}" \

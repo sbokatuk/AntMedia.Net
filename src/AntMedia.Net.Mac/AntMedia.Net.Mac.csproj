@@ -50,6 +50,28 @@
     <ObjcBindingCoreSource Include="../AntMedia.Net.iOS/StructsAndEnums.cs" Link="StructsAndEnums.cs" />
   </ItemGroup>
 
+  <!--
+    How the frameworks reach the consuming app.
+
+    Both are *dynamic* frameworks, so they cannot be linked into this assembly: they have to be
+    present when the app itself is linked and bundled, or the build fails with
+
+        Undefined symbols for architecture arm64:
+          "_OBJC_CLASS_$_AMSClient", referenced from: <initial-undefines>
+
+    because the registrar passes -u for every bound Objective-C class while nothing supplies them.
+
+    Declaring them as NativeReference here is what handles that. With NoBindingEmbedding the
+    frameworks are packed beside the assembly as <name>.resources.zip, once per target framework,
+    and the Apple SDK unpacks and links them in whichever app references this package - directly
+    or transitively.
+
+    A package-level build/<id>.targets that re-declared them in the consuming project would be
+    smaller, since it needs only one copy. It does not work: NuGet's default PrivateAssets hides
+    'build' assets from transitive consumers, so an app that gets here through AntMedia.Net.Maui ->
+    AntMedia.Net would never import it, and would fail with exactly the error above.
+  -->
+
   <ItemGroup>
     <NativeReference Include="lib/WebRTCiOSSDK.xcframework">
       <Kind>Framework</Kind>
@@ -73,11 +95,6 @@
   <ItemGroup>
     <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
-
-    <None Include="lib/WebRTCiOSSDK.xcframework/**" Pack="true" PackagePath="native/WebRTCiOSSDK.xcframework/" Visible="false" />
-    <None Include="lib/WebRTC.xcframework/**" Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
-
-    <None Include="build/AntMedia.Net.Mac.targets" Pack="true" PackagePath="build/" Visible="false" />
   </ItemGroup>
 
 </Project>
