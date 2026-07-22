@@ -82,7 +82,16 @@ fi
 
 echo "==> launching"
 adb logcat -c
-adb shell am start -n "${PACKAGE_NAME}/.MainActivity"
+
+# ANTMEDIA_TEST_SERVER turns on the live publish check. Without it the app runs the offline checks
+# only and logs that it skipped the live one, so a run with no server can never be mistaken for a
+# run that proved streaming works.
+if [ -n "${ANTMEDIA_TEST_SERVER:-}" ]; then
+    echo "==> live publish against ${ANTMEDIA_TEST_SERVER}"
+    adb shell am start -n "${PACKAGE_NAME}/.MainActivity" -e serverUrl "${ANTMEDIA_TEST_SERVER}"
+else
+    adb shell am start -n "${PACKAGE_NAME}/.MainActivity"
+fi
 
 echo "==> waiting for results"
 for _ in $(seq 1 "${POLL_ATTEMPTS}"); do

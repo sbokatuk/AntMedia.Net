@@ -23,7 +23,7 @@ public class MainActivity : Activity
     private const string Tag = "AntMediaE2E";
     private const string DoneMarker = "ANTMEDIA_E2E_DONE";
 
-    protected override void OnCreate(Bundle? savedInstanceState)
+    protected override async void OnCreate(Bundle? savedInstanceState)
     {
         base.OnCreate(savedInstanceState);
 
@@ -31,9 +31,12 @@ public class MainActivity : Activity
         SetContentView(output);
 
         var failures = 0;
+        var total = 0;
 
         foreach (var (name, run) in SmokeTests.All)
         {
+            total++;
+
             try
             {
                 run(this, detail => Log.Info(Tag, $"    {detail}"));
@@ -48,9 +51,33 @@ public class MainActivity : Activity
             }
         }
 
+        // Only when a server was supplied. Most runs have none, and a skipped live check must not
+        // look like a passing one, so it is reported either way.
+        var serverUrl = Intent?.GetStringExtra("serverUrl");
+
+        if (string.IsNullOrEmpty(serverUrl))
+        {
+            Log.Info(Tag, "SKIP live publish (no serverUrl extra)");
+        }
+        else
+        {
+            total++;
+
+            try
+            {
+                Log.Info(Tag, $"    {await LiveStreamTest.RunAsync(this, serverUrl)}");
+                Log.Info(Tag, "PASS live publish");
+            }
+            catch (Exception exception)
+            {
+                failures++;
+                Log.Error(Tag, $"FAIL live publish: {exception}");
+            }
+        }
+
         var verdict = failures == 0
-            ? $"{DoneMarker} PASS ({SmokeTests.All.Count} checks)"
-            : $"{DoneMarker} FAIL ({failures} of {SmokeTests.All.Count} checks failed)";
+            ? $"{DoneMarker} PASS ({total} checks)"
+            : $"{DoneMarker} FAIL ({failures} of {total} checks failed)";
 
         Log.Info(Tag, verdict);
         output.Text = verdict;
