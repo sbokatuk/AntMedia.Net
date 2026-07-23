@@ -4,7 +4,7 @@
 [![release](https://github.com/sbokatuk/AntMedia.Net/actions/workflows/release.yml/badge.svg)](https://github.com/sbokatuk/AntMedia.Net/actions/workflows/release.yml)
 [![Targets: net8.0 | net9.0 | net10.0](https://img.shields.io/badge/targets-net8.0%20%7C%20net9.0%20%7C%20net10.0-512BD4)](#packages)
 [![Platforms: Android | iOS | Mac Catalyst](https://img.shields.io/badge/platforms-Android%20%7C%20iOS%20%7C%20Mac%20Catalyst-blue)](#packages)
-[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](#licence)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 
 .NET bindings for the [Ant Media][antmedia] WebRTC SDKs, with one API across Android, iOS and
 Mac Catalyst.
@@ -84,9 +84,10 @@ See [docs/BUILD.md](docs/BUILD.md). In short:
 
 ## Licence
 
-The binding and client code is MIT. The bundled Ant Media SDKs are MIT, and the
-`WebRTC.xcframework` in the iOS package is Ant Media's build of libwebrtc, under its own BSD
-licence.
+The binding and client code is MIT — see [LICENSE](LICENSE). The bundled Ant Media SDKs are MIT,
+and the `WebRTC.xcframework` in the iOS package is Ant Media's build of libwebrtc, under its own
+BSD licence. The Mac Catalyst package carries a stock community build of libwebrtc instead, under
+the same BSD licence.
 
 [antmedia]: https://antmedia.io/
 [android-sdk]: https://github.com/ant-media/WebRTC-Android-SDK
