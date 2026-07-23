@@ -28,6 +28,115 @@ client.PublishStarted += (_, e) => Console.WriteLine($"live: {e.StreamId}");
 await client.PublishAsync("my-stream");  // completes when the server confirms
 ```
 
+## Without MAUI
+
+`AntMedia.Net.Maui` only adds the video view, the handler and the Android `Activity` lookup. A
+plain .NET for Android or .NET for iOS app needs none of that — reference `AntMedia.Net` and use
+the same `AntMediaClient`, with the platform's own view type instead of `AntMediaVideoView`:
+
+```sh
+dotnet add package AntMedia.Net
+```
+
+**Android** — the SDK renders into `org.webrtc`'s `SurfaceViewRenderer`, and needs the `Activity`:
+
+```csharp
+using AntMedia.Net;
+using Android.App;
+using Android.OS;
+using Android.Util;
+using Org.Webrtc;
+
+[Activity(Label = "Publisher", MainLauncher = true)]
+public class MainActivity : Activity
+{
+    private AntMediaClient? _client;
+    private SurfaceViewRenderer? _preview;
+
+    protected override async void OnCreate(Bundle? savedInstanceState)
+    {
+        base.OnCreate(savedInstanceState);
+
+        // org.webrtc's own view, straight from the Android binding.
+        _preview = new SurfaceViewRenderer(this);
+        SetContentView(_preview);
+
+        var options = new AntMediaOptions
+        {
+            ServerUrl = "wss://your-server:5443/WebRTCAppEE/websocket",
+        };
+
+        // The Activity is the one thing the Android SDK cannot work out for itself: it needs one
+        // for the camera and the renderers. AntMedia.Net.Maui is what supplies it in a MAUI app.
+        _client = new AntMediaClient(options, this);
+        _client.SetLocalRenderer(_preview);
+
+        _client.PublishStarted += (_, e) => Log.Info("app", $"live: {e.StreamId}");
+        _client.Error += (_, e) => Log.Error("app", e.Message);
+
+        await _client.PublishAsync("my-stream");
+    }
+
+    protected override void OnDestroy()
+    {
+        // Releases the camera and the renderer's EGL context; managed collection alone does not.
+        _client?.Dispose();
+        base.OnDestroy();
+    }
+}
+```
+
+**iOS and Mac Catalyst** — one file for both, because the facade takes an ordinary `UIView` and
+adds its own renderer inside it. Note there is no `Activity` parameter here:
+
+```csharp
+using System;
+using AntMedia.Net;
+using UIKit;
+
+public class StreamViewController : UIViewController
+{
+    private AntMediaClient? _client;
+
+    public override async void ViewDidAppear(bool animated)
+    {
+        base.ViewDidAppear(animated);
+
+        var options = new AntMediaOptions
+        {
+            ServerUrl = "wss://your-server:5443/WebRTCAppEE/websocket",
+        };
+
+        _client = new AntMediaClient(options);
+
+        // Any UIView will do — the SDK adds its own renderer as a subview.
+        _client.SetLocalView(View!);
+
+        _client.PublishStarted += (_, e) => Console.WriteLine($"live: {e.StreamId}");
+        _client.Error += (_, e) => Console.WriteLine($"error: {e.Message}");
+
+        await _client.PublishAsync("my-stream");
+    }
+
+    public override void ViewDidDisappear(bool animated)
+    {
+        _client?.Dispose();
+        _client = null;
+        base.ViewDidDisappear(animated);
+    }
+}
+```
+
+Playing instead of publishing is `SetRemoteView`/`SetRemoteRenderer` and `PlayAsync`. Both
+snippets create the client once the view exists rather than in a constructor — on Android the
+`Activity` is not usable before `OnCreate`, and on Apple the view has no window before
+`ViewDidAppear`.
+
+Capture permissions are the app's own responsibility either way: `CAMERA` and `RECORD_AUDIO` in
+`AndroidManifest.xml`, `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` in
+`Info.plist`, plus `com.apple.security.device.camera` and `.audio-input` entitlements for a
+sandboxed Mac Catalyst app.
+
 ## Packages
 
 | Package | What it is | Target frameworks |
