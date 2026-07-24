@@ -4,10 +4,14 @@ set -euo pipefail
 # Packs every AntMedia.Net package for net8, net9 and net10.
 #
 # Usage:
-#   ./build/BuildNugets.sh                            # version from Directory.Build.props
+#   ./build/BuildNugets.sh                            # <props version>-local.<timestamp>
 #   ./build/BuildNugets.sh 2.17.2-beta.4              # explicit package version
 #   ./build/BuildNugets.sh 2.17.2-beta.4 android      # only AntMedia.Net.Android
 #   ./build/BuildNugets.sh 2.17.2-beta.4 apple        # only the Apple bindings + AntMedia.Net
+#
+# The no-argument default is deliberately never a released version: packing plain 2.17.2 locally
+# would collide with the published 2.17.2 in the global package cache, and the sample and device
+# tests would silently restore the published bits instead of the freshly packed ones.
 #
 # The scope argument exists for CI, which packs Android on a Linux runner and the Apple packages
 # on a macOS one. It defaults to 'all', minus iOS when not running on macOS.
@@ -37,17 +41,19 @@ PASS2_BAND="net10"
 PASS2_SDK="10.0.100"
 
 VERSION="${1:-}"
-VERSION_ARG=""
-if [ -n "${VERSION}" ]; then
-    # Validated before being interpolated into MSBuild arguments and package file names.
-    case "${VERSION}" in
-        *[!A-Za-z0-9.+_-]*)
-            echo "error: invalid version '${VERSION}'" >&2
-            exit 1
-            ;;
-    esac
-    VERSION_ARG="-p:Version=${VERSION}"
+if [ -z "${VERSION}" ]; then
+    VERSION="${ANTMEDIA_VERSION}-local.$(date +%Y%m%d%H%M%S)"
+    echo "==> no version given; packing as ${VERSION}"
 fi
+
+# Validated before being interpolated into MSBuild arguments and package file names.
+case "${VERSION}" in
+    *[!A-Za-z0-9.+_-]*)
+        echo "error: invalid version '${VERSION}'" >&2
+        exit 1
+        ;;
+esac
+VERSION_ARG="-p:Version=${VERSION}"
 
 SCOPE="${2:-all}"
 case "${SCOPE}" in

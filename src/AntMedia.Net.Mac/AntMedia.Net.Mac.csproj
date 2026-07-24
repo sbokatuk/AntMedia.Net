@@ -27,7 +27,11 @@
     <!-- Dynamic frameworks; see the comment in AntMedia.Net.iOS.csproj and the .targets below. -->
     <NoBindingEmbedding>true</NoBindingEmbedding>
 
-    <!-- CS1591: the generated binding carries no XML doc comments. -->
+    <!--
+      CS1591: the hand-written ApiDefinition is fully documented, but the generator emits
+      support members with no docs of their own - the IntPtr/NSObjectFlag constructors and
+      ClassHandle on every bound type - so the warning cannot be enabled wholesale.
+    -->
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
 

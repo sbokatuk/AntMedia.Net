@@ -3,10 +3,11 @@ using System.Xml.Linq;
 namespace AntMedia.Net.PackageTests;
 
 /// <summary>
-/// Asserts that the metapackage points every target framework at the right platform binding.
-/// It carries no assemblies, so its dependency groups are the entire package — and they are
-/// assembled from two SDK-band passes by build/merge-packages.py, which is exactly where a
-/// target framework can go missing without anything failing.
+/// Asserts that AntMedia.Net points every target framework at the right platform binding. The
+/// package carries the cross-platform client assembly these days, but its dependency groups are
+/// still what wires a consumer to the bindings — and they are assembled from two SDK-band passes
+/// by build/merge-packages.py, which is exactly where a target framework can go missing without
+/// anything failing.
 /// </summary>
 public class MetapackageTests
 {

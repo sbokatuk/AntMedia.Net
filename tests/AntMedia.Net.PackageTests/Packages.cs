@@ -94,7 +94,8 @@ public static class Packages
     /// The Apple packages are only built on macOS, so on a Linux run the iOS, Mac and metapackage
     /// tests skip rather than fail. CI validates on a runner that has both sets downloaded.
     /// </summary>
-    public static bool Exists(string packageId) => Find(packageId, throwIfMissing: false) is not null;
+    public static bool Exists(string packageId, string extension = ".nupkg") =>
+        Find(packageId, throwIfMissing: false, extension) is not null;
 
     public static string FindPackage(string packageId, string extension = ".nupkg") =>
         Find(packageId, throwIfMissing: true, extension)!;

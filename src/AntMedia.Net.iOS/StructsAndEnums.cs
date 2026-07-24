@@ -27,5 +27,6 @@ public enum AMSMode : long
     /// <summary>Multi-track conference room.</summary>
     Conference = 4,
 
+    /// <summary>No role chosen yet; the SDK's initial state.</summary>
     Unspecified = 5,
 }
