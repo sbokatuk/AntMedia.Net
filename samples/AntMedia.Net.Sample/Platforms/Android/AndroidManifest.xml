@@ -10,7 +10,14 @@
 	<uses-permission android:name="android.permission.RECORD_AUDIO" />
 	<!-- The SDK routes audio and switches the speaker on and off. -->
 	<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-	<!-- Android 12+ requires this to route audio to a Bluetooth headset. -->
+	<!--
+	  Android 12+ requires this to route audio to a Bluetooth headset — and it is a *runtime*
+	  permission there, which this sample deliberately does not request: MAUI's built-in
+	  Permissions has no type for it, a custom BasePlatformPermission would be the sample's only
+	  per-platform code, and the demo works fine on the phone's own speaker and microphone. In an
+	  app that needs headset routing, request BLUETOOTH_CONNECT the same way the sample requests
+	  Camera, via a one-class custom permission.
+	-->
 	<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
 	<!-- Declared as optional so the app still installs on a device with no camera, e.g. for play-only use. -->

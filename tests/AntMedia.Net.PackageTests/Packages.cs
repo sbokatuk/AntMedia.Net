@@ -53,39 +53,26 @@ public static class Packages
             .Select(tfm => new object[] { tfm });
 
     /// <summary>
-    /// The names of everything in a binding package's native payload for one target framework.
+    /// The names of everything in a binding package's native payload, relative to native/.
     ///
-    /// Two shapes, both produced by the same NoBindingEmbedding setting: the .NET 9 SDK band
-    /// writes a &lt;assembly&gt;.resources *directory*, the .NET 10 band writes a
-    /// &lt;assembly&gt;.resources.zip. Both are unpacked and linked by the consuming app the same
-    /// way, and both bands end up in the merged package, so a test that knew about only one of
-    /// them would pass or fail depending on which band it happened to look at.
+    /// One copy per package. The payload used to be a NoBindingEmbedding sidecar beside the
+    /// assembly in every lib/&lt;tfm&gt;/ — a &lt;assembly&gt;.resources *directory* from the
+    /// .NET 9 SDK band, a &lt;assembly&gt;.resources.zip from the .NET 10 band — which shipped
+    /// the same ~27 MB once per target framework. The bindings now strip those sidecars at pack
+    /// time and carry a single native/ tree instead, re-declared in every consuming app by
+    /// buildTransitive/&lt;id&gt;.targets; see AntMedia.Net.iOS.csproj for the design.
     ///
-    /// Empty when neither is present, which is itself the interesting failure.
+    /// Empty when native/ is missing, which is itself the interesting failure.
     /// </summary>
-    public static IReadOnlyList<string> NativePayload(string packageId, string tfm)
+    public static IReadOnlyList<string> NativePayload(string packageId)
     {
         using var package = OpenPackage(packageId);
 
-        var directory = $"lib/{tfm}/{packageId}.resources/";
-        var loose = package.Entries
+        const string directory = "native/";
+        return package.Entries
             .Where(e => e.FullName.StartsWith(directory, StringComparison.Ordinal))
             .Select(e => e.FullName[directory.Length..])
             .ToList();
-
-        if (loose.Count > 0)
-        {
-            return loose;
-        }
-
-        var zipped = package.GetEntry($"lib/{tfm}/{packageId}.resources.zip");
-        if (zipped is null)
-        {
-            return [];
-        }
-
-        using var archive = new ZipArchive(zipped.Open());
-        return archive.Entries.Select(e => e.FullName).ToList();
     }
 
     public static string ArtifactsDirectory { get; } = ResolveArtifactsDirectory();
@@ -94,7 +81,8 @@ public static class Packages
     /// The Apple packages are only built on macOS, so on a Linux run the iOS, Mac and metapackage
     /// tests skip rather than fail. CI validates on a runner that has both sets downloaded.
     /// </summary>
-    public static bool Exists(string packageId) => Find(packageId, throwIfMissing: false) is not null;
+    public static bool Exists(string packageId, string extension = ".nupkg") =>
+        Find(packageId, throwIfMissing: false, extension) is not null;
 
     public static string FindPackage(string packageId, string extension = ".nupkg") =>
         Find(packageId, throwIfMissing: true, extension)!;

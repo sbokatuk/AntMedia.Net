@@ -5,6 +5,7 @@ set -euo pipefail
 #
 # Usage:
 #   ./native/mac/fetch-mac.sh                  # commit from Directory.Build.props
+#   ./native/mac/fetch-mac.sh -f              # rebuild even when already up to date
 #   ./native/mac/fetch-mac.sh <commit-sha>     # build a different commit
 #
 # HOW THIS DIFFERS FROM THE iOS BUILD
@@ -31,19 +32,48 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/../../build/pins.sh"
 
-COMMIT="${1:-${ANTMEDIA_IOS_COMMIT}}"
+FORCE=false
+COMMIT=""
+for arg in "$@"; do
+    case "${arg}" in
+        -f|--force) FORCE=true ;;
+        *) COMMIT="${arg}" ;;
+    esac
+done
+COMMIT="${COMMIT:-${ANTMEDIA_IOS_COMMIT}}"
+
 WORK_DIR="${ANTMEDIA_REPO_ROOT}/native/build/mac"
 CHECKOUT="${WORK_DIR}/WebRTC-iOS-SDK"
 DESTINATION="${ANTMEDIA_REPO_ROOT}/src/AntMedia.Net.Mac/lib"
+PIN_FILE="${WORK_DIR}/pin.txt"
 
 SCHEME="WebRTCiOSSDK"
 TARGET="WebRTCiOSSDK"
 PROJECT="${CHECKOUT}/WebRTCiOSSDK.xcodeproj"
 CATALYST_DEPLOYMENT_TARGET="14.0"
 
+INPUTS_HASH="$(cat "${BASH_SOURCE[0]}" \
+    "${SCRIPT_DIR}/../ios/add-facade.py" \
+    "${SCRIPT_DIR}/../ios/Facade/"*.swift \
+    "${SCRIPT_DIR}/Shim/"*.swift \
+    "${SCRIPT_DIR}/enable-catalyst.py" \
+    "${SCRIPT_DIR}/strip-slices.py" \
+    "${SCRIPT_DIR}/flatten-frameworks.py" \
+    | shasum -a 256 | cut -d' ' -f1)"
+
+if [ "${FORCE}" = false ] \
+    && [ -d "${DESTINATION}/${SCHEME}.xcframework" ] \
+    && [ -d "${DESTINATION}/WebRTC.xcframework" ] \
+    && [ -f "${PIN_FILE}" ] \
+    && grep -q "^commit=${COMMIT}$" "${PIN_FILE}" \
+    && grep -q "^webrtc=${ANTMEDIA_MAC_WEBRTC_RELEASE}$" "${PIN_FILE}" \
+    && grep -q "^inputs=${INPUTS_HASH}$" "${PIN_FILE}"; then
+    echo "==> ${DESTINATION} already built from ${COMMIT}; use -f to rebuild"
+    exit 0
+fi
+
 if ! command -v xcodebuild >/dev/null 2>&1; then
-    echo "::error::xcodebuild not found — the Mac Catalyst build requires macOS with Xcode" >&2
-    exit 1
+    antmedia_fail "xcodebuild not found — the Mac Catalyst build requires macOS with Xcode"
 fi
 
 mkdir -p "${WORK_DIR}"
@@ -53,7 +83,18 @@ WEBRTC_ZIP="${WORK_DIR}/webrtc-${ANTMEDIA_MAC_WEBRTC_RELEASE}.zip"
 WEBRTC_DIR="${WORK_DIR}/webrtc-${ANTMEDIA_MAC_WEBRTC_RELEASE}"
 
 if [ ! -d "${WEBRTC_DIR}/WebRTC.xcframework" ]; then
-    curl -sfL "${ANTMEDIA_MAC_WEBRTC_URL}" -o "${WEBRTC_ZIP}"
+    # -sS rather than -s so a failure prints curl's reason; --retry rides out the transient
+    # errors a ~100 MB download from a release CDN occasionally hits.
+    curl -sfSL --retry 3 "${ANTMEDIA_MAC_WEBRTC_URL}" -o "${WEBRTC_ZIP}"
+
+    # GitHub release assets are mutable - deleting and re-uploading under the same name is
+    # possible - so the pin in Directory.Build.props is what says this is the bytes we vetted.
+    ACTUAL_SHA256="$(shasum -a 256 "${WEBRTC_ZIP}" | cut -d' ' -f1)"
+    if [ "${ACTUAL_SHA256}" != "${ANTMEDIA_MAC_WEBRTC_SHA256}" ]; then
+        rm -f "${WEBRTC_ZIP}"
+        antmedia_fail "sha256 mismatch for ${ANTMEDIA_MAC_WEBRTC_URL}: got ${ACTUAL_SHA256}, pinned ${ANTMEDIA_MAC_WEBRTC_SHA256}. If the release was intentionally re-uploaded, re-vet it and update AntMediaMacWebRtcSha256; otherwise treat the asset as compromised."
+    fi
+
     rm -rf "${WEBRTC_DIR}"
     mkdir -p "${WEBRTC_DIR}"
     unzip -q "${WEBRTC_ZIP}" -d "${WEBRTC_DIR}"
@@ -63,8 +104,7 @@ fi
 # linker's complaint would be about missing symbols rather than a missing platform.
 if ! /usr/libexec/PlistBuddy -c 'Print :AvailableLibraries' \
     "${WEBRTC_DIR}/WebRTC.xcframework/Info.plist" 2>/dev/null | grep -q maccatalyst; then
-    echo "::error::${ANTMEDIA_MAC_WEBRTC_URL} has no maccatalyst slice" >&2
-    exit 1
+    antmedia_fail "${ANTMEDIA_MAC_WEBRTC_URL} has no maccatalyst slice"
 fi
 
 echo "==> Ant Media iOS SDK ${COMMIT} (built for Mac Catalyst)"
@@ -100,7 +140,10 @@ ARCHIVE="${WORK_DIR}/maccatalyst.xcarchive"
 rm -rf "${ARCHIVE}"
 
 echo "==> archiving for Mac Catalyst (arm64)"
-xcodebuild archive \
+XCODEBUILD_LOG="${WORK_DIR}/xcodebuild-maccatalyst.log"
+# The full log goes to a file and only errors to the console; on failure the file has the
+# context the grep filter drops.
+if ! xcodebuild archive \
     -project "${PROJECT}" \
     -scheme "${SCHEME}" \
     -configuration Release \
@@ -114,20 +157,22 @@ xcodebuild archive \
     CODE_SIGN_IDENTITY="" \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_ALLOWED=NO \
-    | (grep -E '(error:|BUILD (SUCCEEDED|FAILED))' || true)
+    > "${XCODEBUILD_LOG}" 2>&1; then
+    grep -E '(error:|BUILD FAILED)' "${XCODEBUILD_LOG}" >&2 || true
+    antmedia_fail "xcodebuild archive failed for Mac Catalyst; full log: ${XCODEBUILD_LOG}"
+fi
+grep -E 'BUILD SUCCEEDED' "${XCODEBUILD_LOG}" || true
 
 FRAMEWORK="${ARCHIVE}/Products/Library/Frameworks/${SCHEME}.framework"
 if [ ! -d "${FRAMEWORK}" ]; then
-    echo "::error::xcodebuild reported success but ${FRAMEWORK} is missing" >&2
-    exit 1
+    antmedia_fail "xcodebuild reported success but ${FRAMEWORK} is missing"
 fi
 
 # Same guard as the iOS build: a Swift @objc class with no explicit Objective-C name is exported
 # under its mangled name, and the .NET binding would fail to link against it in every consuming app.
 for class in AMSClient AMSStreamInformation; do
     if ! nm -gU "${FRAMEWORK}/${SCHEME}" 2>/dev/null | grep -q "_OBJC_CLASS_\\\$_${class}\$"; then
-        echo "::error::${SCHEME} does not export _OBJC_CLASS_\$_${class}" >&2
-        exit 1
+        antmedia_fail "${SCHEME} does not export _OBJC_CLASS_\$_${class}"
     fi
 done
 
@@ -153,10 +198,13 @@ for framework in "${DESTINATION}"/*.xcframework; do
     python3 "${SCRIPT_DIR}/flatten-frameworks.py" "${framework}"
 done
 
-cat > "${WORK_DIR}/pin.txt" <<EOF
+# What the staged frameworks were built from. The up-to-date check reads it, and CI surfaces it
+# in the build summary.
+cat > "${PIN_FILE}" <<EOF
 commit=$(git -C "${CHECKOUT}" rev-parse HEAD)
 commit_date=$(git -C "${CHECKOUT}" show -s --format=%cs HEAD)
 webrtc=${ANTMEDIA_MAC_WEBRTC_RELEASE}
+inputs=${INPUTS_HASH}
 EOF
 
 echo "==> staged in ${DESTINATION}:"

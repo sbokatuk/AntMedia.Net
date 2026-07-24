@@ -4,7 +4,7 @@
 [![release](https://github.com/sbokatuk/AntMedia.Net/actions/workflows/release.yml/badge.svg)](https://github.com/sbokatuk/AntMedia.Net/actions/workflows/release.yml)
 [![Targets: net8.0 | net9.0 | net10.0](https://img.shields.io/badge/targets-net8.0%20%7C%20net9.0%20%7C%20net10.0-512BD4)](#packages)
 [![Platforms: Android | iOS | Mac Catalyst](https://img.shields.io/badge/platforms-Android%20%7C%20iOS%20%7C%20Mac%20Catalyst-blue)](#packages)
-[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-green)](https://github.com/sbokatuk/AntMedia.Net/blob/main/LICENSE)
 
 .NET bindings for the [Ant Media][antmedia] WebRTC SDKs, with one API across Android, iOS and
 Mac Catalyst.
@@ -16,17 +16,40 @@ dotnet add package AntMedia.Net.Maui    # MAUI apps: adds the video view
 dotnet add package AntMedia.Net         # everything else
 ```
 
+Three pieces of wiring, then the client. First register the handler — without this the video
+view renders nothing:
+
+```csharp
+// MauiProgram.cs
+builder.UseMauiApp<App>().UseAntMedia();
+```
+
+Declare the namespace and drop a view into your XAML:
+
+```xml
+<ContentPage xmlns:antmedia="http://schemas.sbokatuk.com/antmedia/maui" ...>
+    <antmedia:AntMediaVideoView x:Name="LocalView" />
+```
+
+Then create the client **once the page has appeared** — in `OnAppearing`, not the constructor:
+on Android the SDK needs the current `Activity`, which does not exist any earlier.
+`CreateClient()` and `SetLocalView(AntMediaVideoView)` come from `AntMedia.Net.Maui`:
+
 ```csharp
 var client = new AntMediaOptions
 {
     ServerUrl = "wss://your-server:5443/WebRTCAppEE/websocket",
 }.CreateClient();
 
-client.SetLocalView(LocalView);          // an <antmedia:AntMediaVideoView /> from your XAML
+client.SetLocalView(LocalView);          // the <antmedia:AntMediaVideoView /> from your XAML
 client.PublishStarted += (_, e) => Console.WriteLine($"live: {e.StreamId}");
 
 await client.PublishAsync("my-stream");  // completes when the server confirms
 ```
+
+Playing is the same shape: `SetRemoteView` and `PlayAsync`. One client runs one session —
+publish *or* play — so a video-call page uses two clients. Events arrive on SDK threads;
+marshal before touching UI (`MainThread.BeginInvokeOnMainThread`).
 
 ## Without MAUI
 
@@ -132,6 +155,14 @@ snippets create the client once the view exists rather than in a constructor —
 `Activity` is not usable before `OnCreate`, and on Apple the view has no window before
 `ViewDidAppear`.
 
+`AntMedia.Net.Maui` has no Windows target, because the Ant Media SDKs have none. The default
+MAUI template also targets `net*-windows` on Windows machines, so condition the reference:
+
+```xml
+<PackageReference Include="AntMedia.Net.Maui" Version="..."
+    Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'windows'" />
+```
+
 Capture permissions are the app's own responsibility either way: `CAMERA` and `RECORD_AUDIO` in
 `AndroidManifest.xml`, `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` in
 `Info.plist`, plus `com.apple.security.device.camera` and `.audio-input` entitlements for a
@@ -150,7 +181,17 @@ sandboxed Mac Catalyst app.
 Each package pulls in the one below it, so a single reference is enough. Drop to a platform
 binding directly when you need something the cross-platform API does not expose — the full SDK
 surface is there under `AntMedia.WebRTC.*` (Android), `AntMedia.Net.iOS.*` (iOS) and
-`AntMedia.Net.Mac.*` (Mac Catalyst).
+`AntMedia.Net.Mac.*` (Mac Catalyst). The two Apple bindings expose the same types under
+different namespaces, so a file shared between iOS and Mac Catalyst raw-binding code needs one
+alias:
+
+```csharp
+#if MACCATALYST
+using AMS = AntMedia.Net.Mac;
+#else
+using AMS = AntMedia.Net.iOS;
+#endif
+```
 
 ## Why there is a cross-platform layer
 
@@ -159,8 +200,9 @@ interface, iOS has a Swift client reached through an Objective-C facade and a de
 against the bindings directly, an app targeting both needs roughly 300 lines of adapter before it
 can publish a stream. `AntMedia.Net` is that adapter, so you do not write it.
 
-The sample is the evidence: [`samples/AntMedia.Net.Sample`](samples) publishes and plays with no
-per-platform code at all.
+The sample is the evidence:
+[`samples/AntMedia.Net.Sample`](https://github.com/sbokatuk/AntMedia.Net/tree/main/samples)
+publishes and plays with no per-platform code at all.
 
 ## What is bound
 
@@ -170,19 +212,22 @@ documented with the SDK's own javadoc.
 
 **iOS** binds [WebRTC-iOS-SDK][ios-sdk] through an `@objc` facade this repository maintains. The
 upstream SDK is Swift and exposes almost nothing to Objective-C, so there is nothing for a .NET
-binding to attach to; [`native/ios/Facade`](native/ios/Facade) re-exposes the client API and is
-compiled into the framework. See [docs/BUILD.md](docs/BUILD.md) for what that leaves out.
+binding to attach to;
+[`native/ios/Facade`](https://github.com/sbokatuk/AntMedia.Net/tree/main/native/ios/Facade)
+re-exposes the client API and is compiled into the framework. See
+[docs/BUILD.md](https://github.com/sbokatuk/AntMedia.Net/blob/main/docs/BUILD.md) for what that
+leaves out.
 
 **Mac Catalyst** binds the same Swift SDK, from the same commit, through the same facade — but
 against a different libwebrtc. Ant Media's own is a fork (it adds `RTCAudioDeviceModule`) published
 for iOS only, so `AntMedia.Net.Mac` links a stock community build that ships a `maccatalyst` slice
 and compiles a small shim beside the facade to supply the API their Swift code expects. iOS and
 Android are untouched and keep using Ant Media's own libraries. Apple Silicon only. See
-[docs/BUILD.md](docs/BUILD.md).
+[docs/BUILD.md](https://github.com/sbokatuk/AntMedia.Net/blob/main/docs/BUILD.md).
 
 ## Building
 
-See [docs/BUILD.md](docs/BUILD.md). In short:
+See [docs/BUILD.md](https://github.com/sbokatuk/AntMedia.Net/blob/main/docs/BUILD.md). In short:
 
 ```sh
 ./native/android/fetch-android.sh     # builds the .aar from source (JDK 17 + Android SDK)
@@ -193,10 +238,12 @@ See [docs/BUILD.md](docs/BUILD.md). In short:
 
 ## Licence
 
-The binding and client code is MIT — see [LICENSE](LICENSE). The bundled Ant Media SDKs are MIT,
-and the `WebRTC.xcframework` in the iOS package is Ant Media's build of libwebrtc, under its own
-BSD licence. The Mac Catalyst package carries a stock community build of libwebrtc instead, under
-the same BSD licence.
+The binding and client code is MIT — see
+[LICENSE](https://github.com/sbokatuk/AntMedia.Net/blob/main/LICENSE). The bundled Ant Media
+SDKs are MIT, and the `WebRTC.xcframework` in the iOS package is Ant Media's build of libwebrtc,
+under its own BSD licence. The Mac Catalyst package carries a stock community build of libwebrtc
+instead, under the same BSD licence. The licence and notice texts for everything redistributed
+ship inside each package as `THIRD-PARTY-NOTICES.txt`.
 
 [antmedia]: https://antmedia.io/
 [android-sdk]: https://github.com/ant-media/WebRTC-Android-SDK

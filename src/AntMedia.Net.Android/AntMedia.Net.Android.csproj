@@ -62,10 +62,12 @@
                    Condition="Exists('$(MSBuildProjectDirectory)/Jars/webrtc-android-framework-sources.jar')" />
   </ItemGroup>
 
+  <!--
+    Only Metadata.xml: the EnumFields/EnumMethods templates the binding scaffold generates were
+    never filled in, so they are not carried.
+  -->
   <ItemGroup>
     <TransformFile Include="Transforms/Metadata.xml" />
-    <TransformFile Include="Transforms/EnumFields.xml" />
-    <TransformFile Include="Transforms/EnumMethods.xml" />
   </ItemGroup>
 
   <!--

@@ -28,7 +28,7 @@
     help: it renames the event, not the handler field. Renaming the managed method of the
     two-argument overload is what separates them; the JNI signature is unaffected, so the binding
     still dispatches to the right Java method.
-  -->
+
     DefaultWebRTCListener implements the interface, so its overload has to be renamed in step or
     it no longer satisfies the renamed interface member (CS0535).
   -->

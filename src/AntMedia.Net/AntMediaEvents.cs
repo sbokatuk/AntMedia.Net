@@ -16,6 +16,13 @@ public sealed class AntMediaErrorEventArgs(string message, string streamId)
 {
     /// <summary>The SDK's description. Wording comes from the server and is not stable.</summary>
     public string Message { get; } = message;
+
+    /// <summary>
+    /// The stable category of the problem — match on this rather than on
+    /// <see cref="Message" />. <see cref="AntMediaErrorCode.Unknown" /> when the message is one
+    /// this library does not recognise.
+    /// </summary>
+    public AntMediaErrorCode Code { get; } = AntMediaErrorCodes.FromMessage(message);
 }
 
 /// <summary>A media track was added to or removed from the session.</summary>
@@ -24,7 +31,11 @@ public sealed class AntMediaTrackEventArgs(string trackId, string kind) : EventA
     /// <summary>The WebRTC track id, as the server assigned it.</summary>
     public string TrackId { get; } = trackId;
 
-    /// <summary>Either <c>"audio"</c> or <c>"video"</c>.</summary>
+    /// <summary>
+    /// Either <c>"audio"</c> or <c>"video"</c>. On Android only video tracks are reported —
+    /// the SDK's listener has no audio-track callback — so <c>"audio"</c> can only be seen on
+    /// iOS and Mac Catalyst.
+    /// </summary>
     public string Kind { get; } = kind;
 }
 

@@ -22,10 +22,10 @@ public class BindingApiTests
         "Org.Webrtc.PeerConnection",
     ];
 
-    /// <summary>Types the iOS binding must expose. All come from our @objc facade.</summary>
     /// <summary>
-    /// The facade's types, without the namespace: the same ApiDefinition produces
-    /// AntMedia.Net.iOS on iOS and AntMedia.Net.Mac on Catalyst.
+    /// Types the Apple bindings must expose, without the namespace: the same ApiDefinition
+    /// produces AntMedia.Net.iOS on iOS and AntMedia.Net.Mac on Catalyst, and all of these come
+    /// from our @objc facade.
     /// </summary>
     private static readonly string[] AppleCoreTypes =
     [

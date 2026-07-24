@@ -52,10 +52,10 @@ def dependency_groups(nuspec: str) -> dict[str, str]:
 def target_frameworks(package: zipfile.ZipFile) -> set[str]:
     """Every target framework the package serves.
 
-    Usually read from the lib/<tfm>/ folders, but a dependency-only package - the AntMedia.Net
-    metapackage - has no lib/ at all and declares its target frameworks solely as nuspec
-    dependency groups. Ignoring those would silently drop the .NET 10 leg of the metapackage
-    during the merge.
+    Usually read from the lib/<tfm>/ folders, but nuspec dependency groups are counted too:
+    AntMedia.Net was a dependency-only metapackage with no lib/ at all until it grew the
+    cross-platform client, and counting groups is what keeps the merge correct for any package
+    shaped that way (a snupkg's nuspec, by contrast, declares no groups and is served by lib/).
     """
     found = set()
     for name in package.namelist():
@@ -95,6 +95,30 @@ def add_dependency_groups(nuspec: str, frameworks: list[str], source: dict[str, 
     raise ValueError("nuspec has no </metadata> element")
 
 
+def unexpected_assets(
+    additional: zipfile.ZipFile, primary_names: set[str], carried: set[str]
+) -> list[str]:
+    """Assets in ADDITIONAL that the merge would silently drop.
+
+    The merge deliberately carries only lib/<tfm>/ trees, because that is the only place these
+    packages put *per-framework* payload. The Apple bindings' native/ trees and buildTransitive/
+    targets are framework-agnostic and identical in both passes, so PRIMARY's copy already covers
+    them - same-named entries are not "unique to ADDITIONAL" and pass through here untouched. If
+    a future pass ever emits runtimes/, ref/ or anything else genuinely unique to it, dropping it
+    with a green build would be the worst outcome - so it is an error instead. Packaging plumbing
+    that legitimately differs between passes (the psmdcp has a fresh guid every pack) is exempt.
+    """
+    return sorted(
+        name
+        for name in additional.namelist()
+        if name not in carried
+        and name not in primary_names
+        and not name.startswith(("_rels/", "package/"))
+        and not name.endswith(".nuspec")
+        and name != "[Content_Types].xml"
+    )
+
+
 def merge(primary_path: Path, additional_path: Path, output_path: Path) -> list[str]:
     with zipfile.ZipFile(primary_path) as primary, zipfile.ZipFile(additional_path) as additional:
         missing = sorted(target_frameworks(additional) - target_frameworks(primary))
@@ -108,12 +132,26 @@ def merge(primary_path: Path, additional_path: Path, output_path: Path) -> list[
             if any(name.startswith(f"lib/{tfm}/") for tfm in missing)
         ]
 
+        primary_names = set(primary.namelist())
+        dropped = unexpected_assets(additional, primary_names, set(carried))
+        if dropped:
+            raise ValueError(
+                f"{additional_path.name} carries assets outside lib/<tfm>/ that the merge does "
+                f"not handle: {', '.join(dropped)}. Teach merge-packages.py about them rather "
+                "than shipping a package with them silently missing."
+            )
+
         additional_groups = dependency_groups(read_nuspec(additional))
+
+        # A symbol package's nuspec declares no dependency groups - its target frameworks are its
+        # lib/<tfm>/*.pdb trees - so it gets the pdbs carried across but no nuspec surgery, which
+        # would otherwise bolt a <dependencies> element onto a nuspec that never has one.
+        rewrite_nuspec = output_path.suffix != ".snupkg"
 
         with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as merged:
             for item in primary.infolist():
                 data = primary.read(item.filename)
-                if item.filename.endswith(".nuspec"):
+                if rewrite_nuspec and item.filename.endswith(".nuspec"):
                     had_bom = data.startswith(BOM)
                     rewritten = add_dependency_groups(
                         data.decode("utf-8-sig"), missing, additional_groups
@@ -153,6 +191,18 @@ def main(argv: list[str]) -> int:
 
         added = merge(package, counterpart, output_dir / package.name)
         print(f"{package.name}: added {', '.join(added) if added else 'nothing'}")
+
+    # The reverse gap: a package only the ADDITIONAL pass produced would otherwise vanish
+    # without a word, since the loop above walks PRIMARY.
+    primary_names = {p.name for p in packages}
+    for orphan in sorted(
+        p.name
+        for ext in ("*.nupkg", "*.snupkg")
+        for p in additional_dir.glob(ext)
+        if p.name not in primary_names
+    ):
+        print(f"error: {orphan} exists only in {additional_dir}; nothing to merge it into", file=sys.stderr)
+        failed = True
 
     return 1 if failed else 0
 

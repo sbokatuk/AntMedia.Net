@@ -68,22 +68,24 @@ public sealed partial class AntMediaClient : IAntMediaClient
     /// Both SDKs are callback-driven with no completion handle, so the awaitable is built here:
     /// the platform half calls <see cref="CompletePending" /> from its started callback and
     /// <see cref="FailPending" /> from its error callback. The timeout is not belt-and-braces —
-    /// an unreachable host or an unknown stream id can produce no callback at all, and without it
-    /// the returned task would never finish.
+    /// an unreachable host can produce no callback at all, and without it the returned task
+    /// would never finish.
     /// </summary>
     private async Task RunAsync(string streamId, Action start, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         _options.Validate();
 
-        if (_pending is not null)
+        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Interlocked rather than check-then-assign so two racing callers cannot both claim the
+        // slot; whichever loses gets the same error a sequential second caller would.
+        if (Interlocked.CompareExchange(ref _pending, pending, null) is not null)
         {
             throw new InvalidOperationException(
-                "another publish or play is already in progress; await or Stop() it first.");
+                "another publish or play is already in progress; await it, or Stop() it first.");
         }
 
-        var pending = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending = pending;
         StreamId = streamId;
 
         using var timeout = new CancellationTokenSource(_options.Timeout);
@@ -101,7 +103,8 @@ public sealed partial class AntMediaClient : IAntMediaClient
             else
             {
                 pending.TrySetException(new AntMediaException(
-                    $"the server did not confirm '{streamId}' within {_options.Timeout.TotalSeconds:0}s."));
+                    $"the server did not confirm '{streamId}' within {_options.Timeout.TotalSeconds:0}s.",
+                    AntMediaErrorCode.Timeout));
             }
         }).ConfigureAwait(false);
 
@@ -109,31 +112,50 @@ public sealed partial class AntMediaClient : IAntMediaClient
         {
             start();
             await pending.Task.ConfigureAwait(false);
-            IsStreaming = true;
         }
         catch
         {
             // A failed start leaves the native client holding a camera and a peer connection.
-            StreamId = null;
+            // Stop while StreamId still names the session — the platform halves target the
+            // stream by it — and only then forget the state.
             StopCore();
+            IsStreaming = false;
+            StreamId = null;
             throw;
         }
         finally
         {
-            _pending = null;
+            // Clear only our own operation: a Stop() + retry may already have installed a new one.
+            Interlocked.CompareExchange(ref _pending, null, pending);
         }
     }
 
     /// <summary>Called by the platform half when the server confirms the operation started.</summary>
-    private void CompletePending() => _pending?.TrySetResult(true);
+    private void CompletePending()
+    {
+        // State first, event second: set here, on the SDK's callback thread, so a PublishStarted
+        // or PlayStarted handler that reads IsStreaming already sees true. The null check keeps a
+        // late callback delivered after Stop() from reviving the flag.
+        if (StreamId is not null)
+        {
+            IsStreaming = true;
+        }
+
+        _pending?.TrySetResult(true);
+    }
 
     /// <summary>Called by the platform half when the operation cannot proceed.</summary>
-    private void FailPending(string message) =>
-        _pending?.TrySetException(new AntMediaException(message));
+    private void FailPending(string message, AntMediaErrorCode code) =>
+        _pending?.TrySetException(new AntMediaException(message, code));
 
     /// <inheritdoc />
     public void Stop()
     {
+        // A caller still awaiting PublishAsync or PlayAsync is released now — as a cancellation,
+        // because stopping is what the guard message tells them to do — rather than left to run
+        // into the timeout with a misleading "server did not confirm" error.
+        _pending?.TrySetCanceled();
+
         StopCore();
         IsStreaming = false;
         StreamId = null;
@@ -152,12 +174,18 @@ public sealed partial class AntMediaClient : IAntMediaClient
         }
 
         _disposed = true;
+
+        // Faulted rather than cancelled: an awaiter finding its client disposed mid-operation is
+        // a bug worth surfacing, unlike an explicit Stop().
+        _pending?.TrySetException(new ObjectDisposedException(nameof(AntMediaClient)));
+
         Stop();
         DisposeCore();
     }
 
-    // Raised on whichever thread the SDK used. Marshalling to the UI thread is left to the
-    // caller, because this package has no dependency on a UI framework; AntMedia.Net.Maui does it.
+    // Raised on whichever thread the SDK used, never marshalled — see the threading note on
+    // IAntMediaClient. The Raise methods keep state changes ahead of their event so handlers
+    // observe the new state.
     private void RaisePublishStarted(string streamId) =>
         PublishStarted?.Invoke(this, new AntMediaStreamEventArgs(streamId));
 
@@ -178,6 +206,12 @@ public sealed partial class AntMediaClient : IAntMediaClient
 
     private void RaiseDisconnected(string streamId)
     {
+        // A drop while starting is the operation's outcome — fail it now rather than leaving the
+        // caller to wait out the timeout.
+        FailPending(
+            "the connection dropped before the server confirmed.",
+            AntMediaErrorCode.Disconnected);
+
         IsStreaming = false;
         Disconnected?.Invoke(this, new AntMediaStreamEventArgs(streamId));
     }
@@ -185,7 +219,7 @@ public sealed partial class AntMediaClient : IAntMediaClient
     private void RaiseError(string message, string streamId)
     {
         // An error while starting is the operation's result, not just a notification.
-        FailPending(message);
+        FailPending(message, AntMediaErrorCodes.FromMessage(message));
         Error?.Invoke(this, new AntMediaErrorEventArgs(message, streamId));
     }
 

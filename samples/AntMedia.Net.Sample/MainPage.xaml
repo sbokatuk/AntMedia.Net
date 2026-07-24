@@ -18,10 +18,17 @@
         <!--
           Both views exist for the whole session: creating one on demand would mean creating a
           native renderer mid-layout, which neither SDK expects.
+
+          Scaling pins both platforms to the same fitting (local previews crop to fill, playback
+          letterboxes), and Mirror flips the selfie preview the way users expect. To overlap the
+          preview on top of the remote view instead of this side-by-side layout, the top view
+          also needs IsMediaOverlay="True" on Android.
         -->
         <Grid Grid.Row="1" ColumnDefinitions="*,*" ColumnSpacing="8">
-            <antmedia:AntMediaVideoView x:Name="LocalView" Grid.Column="0" />
-            <antmedia:AntMediaVideoView x:Name="RemoteView" Grid.Column="1" />
+            <antmedia:AntMediaVideoView x:Name="LocalView" Grid.Column="0"
+                                        Scaling="Fill" Mirror="True" />
+            <antmedia:AntMediaVideoView x:Name="RemoteView" Grid.Column="1"
+                                        Scaling="Fit" />
         </Grid>
 
         <HorizontalStackLayout Grid.Row="2" Spacing="8" HorizontalOptions="Center">
