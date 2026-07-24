@@ -20,6 +20,13 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <!--
+      A checked promise, not an aspiration: the facade is reflection-free, and CI's device tests
+      run fully trimmed - the one configuration where a violation would only show at runtime.
+    -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'android'">true</IsAotCompatible>
   </PropertyGroup>
 
   <PropertyGroup>

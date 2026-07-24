@@ -39,29 +39,51 @@ public sealed partial class AntMediaClient
     }
 
     /// <summary>
-    /// Renders the local camera preview into <paramref name="view" />. The SDK adds its own
-    /// renderer as a subview.
+    /// Renders the local camera preview into <paramref name="view" />, cropped to fill. The SDK
+    /// adds its own renderer as a subview. Passing null clears only this client's reference —
+    /// the SDK has no detach call, so it keeps rendering into the old view until the session
+    /// stops.
     /// </summary>
-    public void SetLocalView(UIView? view)
+    public void SetLocalView(UIView? view) => SetLocalView(view, AntMediaVideoScaling.Fill);
+
+    /// <summary>
+    /// Renders the local camera preview into <paramref name="view" /> with the given scaling.
+    /// </summary>
+    public void SetLocalView(UIView? view, AntMediaVideoScaling scaling)
     {
         _localView = view;
 
         if (view is not null)
         {
-            _client.SetLocalView(view, UIViewContentMode.ScaleAspectFill);
+            _client.SetLocalView(view, ToContentMode(scaling));
         }
     }
 
-    /// <summary>Renders the stream being played into <paramref name="view" />.</summary>
-    public void SetRemoteView(UIView? view)
+    /// <summary>
+    /// Renders the stream being played into <paramref name="view" />, letterboxed to fit. Null
+    /// behaves as on <see cref="SetLocalView(UIView?)" />.
+    /// </summary>
+    public void SetRemoteView(UIView? view) => SetRemoteView(view, AntMediaVideoScaling.Fit);
+
+    /// <summary>
+    /// Renders the stream being played into <paramref name="view" /> with the given scaling.
+    /// </summary>
+    public void SetRemoteView(UIView? view, AntMediaVideoScaling scaling)
     {
         _remoteView = view;
 
         if (view is not null)
         {
-            _client.SetRemoteView(view, UIViewContentMode.ScaleAspectFit);
+            _client.SetRemoteView(view, ToContentMode(scaling));
         }
     }
+
+    private static UIViewContentMode ToContentMode(AntMediaVideoScaling scaling) => scaling switch
+    {
+        AntMediaVideoScaling.Fit => UIViewContentMode.ScaleAspectFit,
+        // Balanced is an Android renderer concept; Fill is the closer of UIKit's two.
+        _ => UIViewContentMode.ScaleAspectFill,
+    };
 
     private void PublishCore(string streamId, string mainTrackId)
     {
@@ -83,6 +105,14 @@ public sealed partial class AntMediaClient
         _client.SetCameraPosition(_options.UseFrontCamera);
         _client.SetTargetResolution(_options.VideoWidth, _options.VideoHeight);
         _client.SetTargetFps(_options.VideoFps);
+
+        // The SDK takes bits per second; the option is kbit/s to match Android's builder. Audio
+        // has no equivalent here, and reconnection is built in and always on — both are noted on
+        // the options. AntMediaOptions.ReconnectionEnabled therefore only steers Android.
+        if (_options.VideoBitrateKbps > 0)
+        {
+            _client.SetMaxVideoBps(Foundation.NSNumber.FromInt64(_options.VideoBitrateKbps * 1000L));
+        }
 
         // Opens the camera and builds the peer connection before contacting the server, so the
         // local preview appears immediately rather than after the round trip.
@@ -115,7 +145,7 @@ public sealed partial class AntMediaClient
     public void SetVideoEnabled(bool enabled) => _client.SetVideoTrack(enabled);
 
     /// <inheritdoc />
-    public void SendData(byte[] data, bool binary = false) =>
+    public void SendData(byte[] data, bool binary = true) =>
         _client.SendData(Foundation.NSData.FromArray(data), binary, StreamId ?? string.Empty);
 
     /// <summary>
