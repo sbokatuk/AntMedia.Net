@@ -21,9 +21,14 @@
     <!--
       github.com/ant-media/WebRTC-Android-SDK. Pinned to a tag: the AAR is built from source by
       native/android/fetch-android.sh, and tracking master would make every build irreproducible.
+
+      The commit is the anchor, the tag the human-readable name for it: tags are mutable, so the
+      fetch script checks out the tag and then asserts it still resolves to this sha — a re-pointed
+      tag fails the build instead of silently building different sources. Update both together.
     -->
     <AntMediaAndroidRepository>https://github.com/ant-media/WebRTC-Android-SDK</AntMediaAndroidRepository>
     <AntMediaAndroidTag>v2.17.2</AntMediaAndroidTag>
+    <AntMediaAndroidCommit>a9c991d1ab45d650b99b83122e0922152a976bcd</AntMediaAndroidCommit>
 
     <!--
       github.com/ant-media/WebRTC-iOS-SDK, pinned to a commit because upstream publishes no
@@ -55,7 +60,13 @@
       iOS and Android are untouched by this and keep using Ant Media's own libraries.
     -->
     <AntMediaMacWebRtcRelease>150.0.0</AntMediaMacWebRtcRelease>
-    <AntMediaMacWebRtcUrl>https://github.com/stasel/WebRTC/releases/download/$(AntMediaMacWebRtcRelease)/WebRTC-M150.xcframework.zip</AntMediaMacWebRtcUrl>
+    <!--
+      Integrity pin for the release asset above (the download url itself is derived in
+      build/pins.sh). GitHub release assets can be deleted and re-uploaded under the same name,
+      so fetch-mac.sh verifies the download against this before using it. Update it together
+      with the release: shasum -a 256 WebRTC-M<major>.xcframework.zip
+    -->
+    <AntMediaMacWebRtcSha256>f9890492b0016e4c88ab20f07867b8b420054caedc8a692b2ec6ac041f3cf6b2</AntMediaMacWebRtcSha256>
   </PropertyGroup>
 
   <!--
@@ -125,5 +136,16 @@
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
     <CheckEolWorkloads>false</CheckEolWorkloads>
   </PropertyGroup>
+
+  <!--
+    Every package redistributes third-party binaries (or depends on packages that do), and the
+    BSD licence on libwebrtc requires its notice to accompany binary redistribution — the MIT
+    PackageLicenseExpression only covers this repository's own code. Added here so all five
+    packages carry the same file; non-packable projects ignore it.
+  -->
+  <ItemGroup>
+    <None Include="$(MSBuildThisFileDirectory)THIRD-PARTY-NOTICES.txt"
+          Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
 
 </Project>
