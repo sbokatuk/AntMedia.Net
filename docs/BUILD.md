@@ -9,7 +9,9 @@ means the same thing a green pipeline does.
 ```
 Directory.Build.props        native SDK pins, target frameworks, shared package metadata
 global.json                  pins the .NET 9 SDK (the "net9 band")
-NuGet.config                 nuget.org + ./artifacts, so tests consume the packed packages
+NuGet.config                 nuget.org + ./artifacts; AntMedia.* is source-mapped to ./artifacts
+                             only, so tests and the sample can never silently restore the
+                             published release instead of what was just packed
 build/
   pins.sh                    the only parser of Directory.Build.props for shell callers
   BuildNugets.sh             two-pass pack + merge -> ./artifacts
@@ -66,12 +68,20 @@ surface: the framework vendors both `io.antmedia.*` and `org.webrtc` Java source
 for `arm64-v8a`, `armeabi-v7a`, `x86` and `x86_64`. The `x86_64` slice is what lets the smoke test
 run on a CI emulator.
 
-Requires a JDK 17 and an Android SDK (`ANDROID_HOME` or `ANDROID_SDK_ROOT`).
+Requires a JDK 17 and an Android SDK (`ANDROID_HOME` or `ANDROID_SDK_ROOT`) — the script checks
+both up front, because a too-new JDK otherwise dies deep inside gradle with an
+unrelated-looking `Unsupported class file major version`.
 
 ```sh
 ./native/android/fetch-android.sh              # the pinned tag
+./native/android/fetch-android.sh -f           # rebuild even when already up to date
 ./native/android/fetch-android.sh v2.17.1      # some other tag
 ```
+
+Building the pinned tag also asserts it still resolves to `AntMediaAndroidCommit`: tags are
+mutable, and a re-pointed tag would otherwise silently build — and execute the gradle scripts
+of — different sources. An explicitly different tag skips the assertion, since the pin says
+nothing about it.
 
 ### iOS
 
@@ -108,7 +118,8 @@ Two details are load-bearing and easy to undo by accident:
   four times smaller, since it needs one copy rather than one per target framework. It does not
   work: NuGet's default `PrivateAssets` hides `build` assets from *transitive* consumers, so an
   app that arrives here through `AntMedia.Net.Maui` → `AntMedia.Net` never imports it, and fails
-  with exactly the error above.
+  with exactly the error above. (`buildTransitive/`, which exists to flow targets to transitive
+  consumers, has not been evaluated — it is the open avenue for shrinking the Apple packages.)
 
 Requires macOS with Xcode. Nothing else is installed: the one fiddly part, adding the facade to
 the upstream Xcode target, is done by [`add-facade.py`](../native/ios/add-facade.py) using `plutil`
@@ -117,11 +128,15 @@ and Xcode reads it back happily in XML form.
 
 ```sh
 ./native/ios/fetch-ios.sh                      # the pinned commit
+./native/ios/fetch-ios.sh -f                   # rebuild even when already up to date
 ./native/ios/fetch-ios.sh <sha>                # some other commit
 ```
 
 Both scripts are pin-keyed and idempotent, which is what makes the CI caches safe: the cache key
 is the pin plus a hash of the script inputs, so changing the facade rebuilds the framework.
+Locally the same identity drives an up-to-date skip — a re-run with nothing changed exits in a
+second; `-f` forces. The full `xcodebuild` logs land in `native/build/<platform>/xcodebuild-*.log`
+(the console only shows errors), which is where to look when an archive fails.
 
 ### Mac Catalyst
 
@@ -130,8 +145,13 @@ and stages the result for `AntMedia.Net.Mac`.
 
 ```sh
 ./native/mac/fetch-mac.sh                      # the pinned commit
+./native/mac/fetch-mac.sh -f                   # rebuild even when already up to date
 ./native/mac/fetch-mac.sh <sha>                # some other commit
 ```
+
+The stock libwebrtc download is verified against `AntMediaMacWebRtcSha256` before use — GitHub
+release assets can be deleted and re-uploaded under the same name, and the pin is what says the
+bytes are the ones that were vetted.
 
 What differs is underneath. Ant Media links a **customised** libwebrtc: their `WebRTC.framework`
 exports `RTCAudioDeviceModule` and ships `RTCAudioDeviceModule.h`, stock builds have neither, and
@@ -169,14 +189,19 @@ Two post-processing steps run before the frameworks are staged, both in `native/
 ## Packing
 
 ```sh
-./build/BuildNugets.sh                          # version from Directory.Build.props
+./build/BuildNugets.sh                          # <props version>-local.<timestamp>
 ./build/BuildNugets.sh 2.17.2-beta.4            # explicit version
 ./build/BuildNugets.sh 2.17.2-beta.4 android    # Android only (what the Linux CI runner does)
 ./build/BuildNugets.sh 2.17.2-beta.4 apple      # iOS + metapackage (the macOS runner)
 ```
 
-Output lands in `./artifacts`, which `NuGet.config` exposes as a package source so the tests and
-the sample app resolve the packages that were just built rather than whatever is on nuget.org.
+The no-argument default is deliberately never a released version: packing plain `2.17.2` would
+collide with the published `2.17.2` in the global package cache, and everything downstream would
+silently test the released bits.
+
+Output lands in `./artifacts`, which `NuGet.config` exposes as a package source — and maps
+`AntMedia.*` to exclusively, so the tests and the sample resolve the packages that were just
+built or fail loudly, never quietly falling back to nuget.org.
 
 ## Testing
 
@@ -349,8 +374,9 @@ On Apple Silicon the community image runs under emulation, which is slower to st
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | [`build.yml`](../.github/workflows/build.yml) | called by the other two | Builds natives, packs, validates, runs all three smoke tests |
-| [`pr.yml`](../.github/workflows/pr.yml) | pull requests | Builds `<version>-beta.<pr>.<run>` and publishes it |
-| [`release.yml`](../.github/workflows/release.yml) | `v*` tags | Publishes the tagged version and creates the GitHub release |
+| [`pr.yml`](../.github/workflows/pr.yml) | pull requests | Builds `<version>-beta.<pr>.<run>`; publishes it only when the PR carries the `publish-beta` label — nuget.org versions are permanent, so betas are opt-in |
+| [`release.yml`](../.github/workflows/release.yml) | `v*` tags | Publishes the tagged version with a build-provenance attestation and creates the GitHub release |
+| [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | weekly | Compares the pins to upstream, re-verifies the pinned libwebrtc asset's bytes, opens an issue on drift |
 
 `build.yml` splits packing across runners: Android needs only a JDK and the Android SDK so it
 packs on `ubuntu-latest`, while the Apple packages need Xcode and pack on `macos-15` — pinned, not
@@ -367,6 +393,35 @@ an `environment:` whose name matches the one recorded on the nuget.org policy �
 
 Policies are scoped to a single workflow file, so `pr.yml` and `release.yml` each need their own
 on nuget.org; one will not cover the other.
+
+## Re-pinning upstream
+
+Everything is pinned in `Directory.Build.props`, and each pin is two-part so a mutable name is
+always anchored by an immutable identity. Update the parts together:
+
+- **Android** — `AntMediaAndroidTag` plus `AntMediaAndroidCommit`. Resolve the new tag's commit
+  with `git ls-remote https://github.com/ant-media/WebRTC-Android-SDK refs/tags/<tag>` (take the
+  `^{}` peeled line if the tag is annotated). The fetch script fails if they disagree.
+- **iOS / Mac Catalyst SDK** — `AntMediaIosCommit` plus `AntMediaIosCommitDate`. Upstream
+  publishes no versions, so the pin is master's head; the date records how current it is.
+  After moving it, check the facade still compiles (`fetch-ios.sh` fails loudly if upstream
+  renamed a client method) and glance over `AntMediaClientDelegate` upstream — a renamed
+  *delegate callback* still compiles, because the protocol has default implementations, and the
+  event it fed just stops arriving. The error-string mapping in
+  `src/AntMedia.Net/AntMediaErrorCode.cs` also mirrors upstream's `AntMediaError.localized`
+  and needs re-checking.
+- **Mac Catalyst libwebrtc** — `AntMediaMacWebRtcRelease` plus `AntMediaMacWebRtcSha256`:
+  download the new `WebRTC-M<major>.xcframework.zip` release asset, `shasum -a 256` it, and pin
+  both.
+
+The weekly [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) run opens an issue
+when any of these moves upstream — including when the pinned libwebrtc asset's *bytes* change
+under an unchanged version, which is a tamper signal rather than an update.
+
+The version the packages ship as is a different axis: `VersionPrefix` tracks the Ant Media
+*SDK* version and stays put between SDK bumps, while each release of this repository appends its
+own fourth digit via the tag (`v2.17.2.4`). Cutting a release is: write
+`docs/release-notes/<version>.md`, tag, push the tag.
 
 [android-sdk]: https://github.com/ant-media/WebRTC-Android-SDK
 [ios-sdk]: https://github.com/ant-media/WebRTC-iOS-SDK

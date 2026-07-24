@@ -15,16 +15,20 @@ wss://your-server:5443/WebRTCAppEE/websocket
 Tap **Publish** to send the device's camera and microphone, or **Play** to view a stream someone
 else is publishing. The panel at the bottom shows the SDK's callbacks as they arrive.
 
-The sample consumes the packed `AntMedia.Net.Maui` package from `../../artifacts`, so pack first:
+The sample consumes the packed `AntMedia.Net.Maui` package from `../../artifacts` — and *only*
+from there: `NuGet.config` maps `AntMedia.*` to the local artifacts source, so the sample can
+never silently test the published release instead of your working tree. Pack first, with a
+version you then hand to the build:
 
 ```sh
-./build/BuildNugets.sh                                    # from the repository root
-dotnet build samples/AntMedia.Net.Sample -f net9.0-android35.0
-dotnet build samples/AntMedia.Net.Sample -f net9.0-ios18.0
+./build/BuildNugets.sh 1.0.0-local.1                      # from the repository root
+dotnet build samples/AntMedia.Net.Sample -f net9.0-android35.0 -p:AntMediaPackageVersion=1.0.0-local.1
+dotnet build samples/AntMedia.Net.Sample -f net9.0-ios18.0     -p:AntMediaPackageVersion=1.0.0-local.1
 ```
 
-Pass `-p:AntMediaPackageVersion=<version>` to build against a specific packed version rather than
-the default from `Directory.Build.props`.
+(`BuildNugets.sh` with no argument also works — it packs `<version>-local.<timestamp>` and
+prints the version to pass.) Without `-p:AntMediaPackageVersion` the build asks for the plain
+version from `Directory.Build.props`, which only exists locally if you packed it.
 
 ## What is worth reading
 
