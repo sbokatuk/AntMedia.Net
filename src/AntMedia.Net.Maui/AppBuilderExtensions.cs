@@ -1,3 +1,10 @@
+// Lets XAML use a stable url instead of a clr-namespace string:
+//   xmlns:antmedia="http://schemas.sbokatuk.com/antmedia/maui"
+[assembly: Microsoft.Maui.Controls.XmlnsDefinition(
+    "http://schemas.sbokatuk.com/antmedia/maui", "AntMedia.Net.Maui")]
+[assembly: Microsoft.Maui.Controls.XmlnsPrefix(
+    "http://schemas.sbokatuk.com/antmedia/maui", "antmedia")]
+
 namespace AntMedia.Net.Maui;
 
 /// <summary>Wires the package into a MAUI app.</summary>
