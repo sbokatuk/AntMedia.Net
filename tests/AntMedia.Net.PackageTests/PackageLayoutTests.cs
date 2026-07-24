@@ -53,30 +53,84 @@ public class PackageLayoutTests
         Packages.IosTargetFrameworks.Select(tfm => new object[] { Packages.IOS, tfm })
             .Concat(Packages.MacCatalystTargetFrameworks.Select(tfm => new object[] { Packages.Mac, tfm }));
 
+    public static IEnumerable<object[]> ApplePackages =>
+        new[] { Packages.IOS, Packages.Mac }.Select(id => new object[] { id });
+
     [SkippableTheory]
-    [MemberData(nameof(ApplePackagesAndFrameworks))]
-    public void Apple_packages_ship_the_xcframeworks_beside_every_binding_assembly(
-        string packageId, string tfm)
+    [MemberData(nameof(ApplePackages))]
+    public void Apple_packages_ship_one_copy_of_the_xcframeworks(string packageId)
     {
         Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
         // Both xcframeworks are dynamic, so they cannot be linked into the binding assembly: the
         // consuming app's linker would never see them and would fail on undefined
-        // _OBJC_CLASS_$_AMSClient. With NoBindingEmbedding they travel beside the assembly, which
-        // is what the Apple SDK unpacks and links in the consuming app - directly or
-        // transitively. If it goes missing, every consumer breaks at link time, which no other
-        // test here would catch.
-        var names = Packages.NativePayload(packageId, tfm);
+        // _OBJC_CLASS_$_AMSClient. They travel once per package under native/, and the
+        // buildTransitive targets re-declare them in every consuming app - directly or
+        // transitively. If the payload goes missing, every consumer breaks at link time, which no
+        // other test here would catch.
+        var names = Packages.NativePayload(packageId);
 
         Assert.True(
             names.Count > 0,
-            $"{packageId} carries no native payload for {tfm}. Without it the frameworks never " +
-            "reach the consuming app.");
+            $"{packageId} carries no native/ payload. Without it the frameworks never reach " +
+            "the consuming app.");
 
         foreach (var framework in new[] { "WebRTCiOSSDK", "WebRTC" })
         {
-            Assert.Contains(names, n => n.Contains($"{framework}.xcframework/", StringComparison.Ordinal));
+            Assert.Contains(names, n => n.StartsWith($"{framework}.xcframework/", StringComparison.Ordinal));
         }
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(ApplePackages))]
+    public void Apple_packages_wire_the_payload_through_buildTransitive_targets(string packageId)
+    {
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
+
+        using var package = Packages.OpenPackage(packageId);
+
+        // buildTransitive/ (not build/, which NuGet's default PrivateAssets hides from transitive
+        // consumers) is what carries the NativeReferences to an app that arrives through
+        // AntMedia.Net.Maui -> AntMedia.Net. The file must be named exactly <id>.targets or NuGet
+        // never imports it, and it must point at both frameworks under native/ - the payload the
+        // previous assertion proved is there.
+        using var stream = Packages.ReadEntry(package, $"buildTransitive/{packageId}.targets");
+        using var reader = new StreamReader(stream);
+        var targets = reader.ReadToEnd();
+
+        Assert.Contains("NativeReference", targets);
+        Assert.Contains("native", targets);
+        foreach (var framework in new[] { "WebRTCiOSSDK.xcframework", "WebRTC.xcframework" })
+        {
+            Assert.Contains(framework, targets);
+        }
+    }
+
+    [SkippableTheory]
+    [MemberData(nameof(ApplePackagesAndFrameworks))]
+    public void Apple_lib_folders_carry_no_per_target_framework_payload(string packageId, string tfm)
+    {
+        Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
+
+        using var package = Packages.OpenPackage(packageId);
+
+        // The Apple SDK's default is to pack the NoBindingEmbedding sidecar into every
+        // lib/<tfm>/, which is how the payload came to ship once per target framework. The
+        // binding csprojs strip it by removing what the SDK's (private, renameable)
+        // _IncludeBindingResourcesInNuGetPackage target adds - so if an SDK update renames that
+        // seam, the sidecars quietly return, the package triples in size, and consumers link
+        // every framework twice (once from the sidecar, once from the buildTransitive targets).
+        // This is the assertion that turns that into a red pack validation instead.
+        var sidecar = package.Entries
+            .Where(e => e.FullName.StartsWith($"lib/{tfm}/{packageId}.resources", StringComparison.Ordinal))
+            .Select(e => e.FullName)
+            .ToList();
+
+        Assert.True(
+            sidecar.Count == 0,
+            $"{packageId} ships a per-target-framework sidecar again for {tfm}: " +
+            $"{string.Join(", ", sidecar.Take(3))}… The pack-time strip in the binding csproj " +
+            "no longer matches the Apple SDK's packaging target.");
     }
 
     [SkippableFact]
@@ -84,7 +138,7 @@ public class PackageLayoutTests
     {
         Skip.IfNot(Packages.Exists(Packages.IOS), "the iOS package is only built on macOS");
 
-        var names = Packages.NativePayload(Packages.IOS, Packages.IosTargetFrameworks[0]);
+        var names = Packages.NativePayload(Packages.IOS);
 
         // Both, or the package works in exactly one of the two places a developer will try it.
         Assert.Contains(names, n => n.Contains("/ios-arm64/", StringComparison.Ordinal));
@@ -96,7 +150,7 @@ public class PackageLayoutTests
     {
         Skip.IfNot(Packages.Exists(Packages.Mac), "the Mac package is only built on macOS");
 
-        var slices = Packages.NativePayload(Packages.Mac, Packages.MacCatalystTargetFrameworks[0])
+        var slices = Packages.NativePayload(Packages.Mac)
             .Where(n => n.Contains(".xcframework/", StringComparison.Ordinal))
             .Select(n => n.Split(".xcframework/")[1].Split('/')[0])
             .Where(s => s.Length > 0 && !s.EndsWith(".plist", StringComparison.Ordinal))
@@ -113,12 +167,12 @@ public class PackageLayoutTests
     }
 
     [SkippableTheory]
-    [MemberData(nameof(ApplePackagesAndFrameworks))]
-    public void Apple_frameworks_are_shallow_bundles(string packageId, string tfm)
+    [MemberData(nameof(ApplePackages))]
+    public void Apple_frameworks_are_shallow_bundles(string packageId)
     {
         Skip.IfNot(Packages.Exists(packageId), $"{packageId} is only built on macOS");
 
-        var names = Packages.NativePayload(packageId, tfm);
+        var names = Packages.NativePayload(packageId);
         Skip.If(names.Count == 0, "covered by the payload test");
 
         // The macOS versioned framework layout is mostly symlinks, and a NuGet package cannot

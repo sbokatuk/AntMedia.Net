@@ -107,13 +107,21 @@ Two details are load-bearing and easy to undo by accident:
   class as `_OBJC_CLASS_$__TtC12WebRTCiOSSDK9AMSClient` while the .NET binding links against
   `_OBJC_CLASS_$_AMSClient`, and every consuming app fails at link time. `fetch-ios.sh` checks the
   exported symbols with `nm` and fails the build if the mangled form comes back.
-- **Both xcframeworks are dynamic, so they travel beside the assembly rather than inside it.**
+- **Both xcframeworks are dynamic, so they travel outside the assembly rather than inside it.**
   A dynamic framework embedded in a binding assembly never reaches the consuming app's linker,
   which fails with `"_OBJC_CLASS_$_AMSClient", referenced from: <initial-undefines>`. The binding
   projects therefore set `NoBindingEmbedding=true` and keep their `NativeReference` items, which
-  packs the frameworks as `<assembly>.resources[.zip]` next to each target framework's assembly;
-  the Apple SDK unpacks and links them in whichever app references the package.
+  writes the frameworks beside the built assembly as a `<assembly>.resources[.zip]` sidecar —
+  what a `ProjectReference` consumer links from.
 
+  The *package* ships them differently: one copy under `native/`, re-declared in every consuming
+  app by `buildTransitive/<id>.targets`, with the Apple SDK's default per-target-framework
+  sidecars stripped at pack time — they would ship the same ~27 MB once per target framework.
+  `buildTransitive/` is the part that makes this correct: assets in plain `build/` are hidden
+  from *transitive* consumers by NuGet's default `PrivateAssets`, so an app that arrives here
+  through `AntMedia.Net.Maui` → `AntMedia.Net` would never import the targets and would fail with
+  exactly the error above. See the comment in
+  [`AntMedia.Net.iOS.csproj`](../src/AntMedia.Net.iOS/AntMedia.Net.iOS.csproj).
   A package-level `build/<id>.targets` that re-declared them in the consuming project would be
   four times smaller, since it needs one copy rather than one per target framework. It does not
   work: NuGet's default `PrivateAssets` hides `build` assets from *transitive* consumers, so an

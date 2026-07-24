@@ -15,6 +15,15 @@ wss://your-server:5443/WebRTCAppEE/websocket
 Tap **Publish** to send the device's camera and microphone, or **Play** to view a stream someone
 else is publishing. The panel at the bottom shows the SDK's callbacks as they arrive.
 
+Use a real iPhone (or the Android emulator, whose camera is emulated) for the session buttons.
+On an iOS *simulator* both Publish and Play trap inside the upstream SDK: its `startCapture()`
+force-unwraps the camera device (`RTCCameraVideoCapturer.supportedFormats(for: captureDevice!)`
+in `WebRTCClient.swift`) and simulators have no camera, so the process dies with `SIGTRAP` before
+reaching the network. The app itself launches and renders fine there — the smoke coverage for
+simulators is `tests/AntMedia.Net.iOS.DeviceTests`, which exercises the binding without starting
+a capture session.
+
+The sample consumes the packed `AntMedia.Net.Maui` package from `../../artifacts`, so pack first:
 The sample consumes the packed `AntMedia.Net.Maui` package from `../../artifacts` — and *only*
 from there: `NuGet.config` maps `AntMedia.*` to the local artifacts source, so the sample can
 never silently test the published release instead of your working tree. Pack first, with a
