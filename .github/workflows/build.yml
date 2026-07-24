@@ -58,7 +58,9 @@ jobs:
     outputs:
       android-tag: ${{ steps.resolve.outputs.android-tag }}
       ios-commit: ${{ steps.resolve.outputs.ios-commit }}
+      android-commit: ${{ steps.resolve.outputs.android-commit }}
       mac-webrtc-release: ${{ steps.resolve.outputs.mac-webrtc-release }}
+      mac-webrtc-sha256: ${{ steps.resolve.outputs.mac-webrtc-sha256 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -71,9 +73,14 @@ jobs:
           ios="${{ inputs.ios-commit }}"
           echo "android-tag=${android:-${ANTMEDIA_ANDROID_TAG}}" >> "$GITHUB_OUTPUT"
           echo "ios-commit=${ios:-${ANTMEDIA_IOS_COMMIT}}" >> "$GITHUB_OUTPUT"
+          # The commit anchors the mutable tag; it joins the .aar cache key so that a re-pointed
+          # tag plus an updated pin cannot keep serving the previous build from cache.
+          echo "android-commit=${ANTMEDIA_ANDROID_COMMIT}" >> "$GITHUB_OUTPUT"
           # No input override: the Mac Catalyst build takes the same Ant Media commit as iOS, and
-          # only the libwebrtc underneath differs. That one is a pin, not a knob.
+          # only the libwebrtc underneath differs. Those are pins, not knobs; the sha joins the
+          # cache key for the same reason as the Android commit.
           echo "mac-webrtc-release=${ANTMEDIA_MAC_WEBRTC_RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "mac-webrtc-sha256=${ANTMEDIA_MAC_WEBRTC_SHA256}" >> "$GITHUB_OUTPUT"
           {
             echo "Binding Ant Media Android \`${android:-${ANTMEDIA_ANDROID_TAG}}\`"
             echo "and iOS \`${ios:-${ANTMEDIA_IOS_COMMIT}}\`,"
@@ -128,13 +135,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: src/AntMedia.Net.Android/Jars
-          # The tag is part of the key: without it a build of a different tag would restore the
-          # previous tag's .aar and silently bind the wrong SDK.
-          key: antmedia-aar-${{ needs.pins.outputs.android-tag }}-${{ hashFiles('native/android/**') }}
+          # The tag and its pinned commit are both in the key: without the tag a build of a
+          # different tag would restore the previous tag's .aar, and without the commit a
+          # re-pointed tag would keep serving the pre-move build until cache eviction.
+          key: antmedia-aar-${{ needs.pins.outputs.android-tag }}-${{ needs.pins.outputs.android-commit }}-${{ hashFiles('native/android/**') }}
 
       - name: Build the Ant Media Android framework
         if: steps.aar.outputs.cache-hit != 'true'
-        run: ./native/android/fetch-android.sh "${{ needs.pins.outputs.android-tag }}"
+        run: |
+          ./native/android/fetch-android.sh "${{ needs.pins.outputs.android-tag }}"
+          {
+            echo '#### Android native build'
+            echo '```'
+            cat native/build/android/pin.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack
         run: ./build/BuildNugets.sh "${{ inputs.version }}" android
@@ -224,20 +239,35 @@ jobs:
 
       - name: Build the Ant Media iOS xcframework
         if: steps.xcframework.outputs.cache-hit != 'true'
-        run: ./native/ios/fetch-ios.sh "${{ needs.pins.outputs.ios-commit }}"
+        run: |
+          ./native/ios/fetch-ios.sh "${{ needs.pins.outputs.ios-commit }}"
+          {
+            echo '#### iOS native build'
+            echo '```'
+            cat native/build/ios/pin.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cache the Mac Catalyst xcframeworks
         id: mac-xcframework
         uses: actions/cache@v4
         with:
           path: src/AntMedia.Net.Mac/lib
-          # Same Ant Media commit and facade as iOS, plus the stock libwebrtc release and the shim
-          # that adapts their Swift to it — any of the four changes the produced framework.
-          key: antmedia-mac-xcframework-${{ needs.pins.outputs.ios-commit }}-${{ needs.pins.outputs.mac-webrtc-release }}-${{ hashFiles('native/ios/**', 'native/mac/**') }}
+          # Same Ant Media commit and facade as iOS, plus the stock libwebrtc release (with its
+          # integrity sha) and the shim that adapts their Swift to it — any of these changes the
+          # produced framework.
+          key: antmedia-mac-xcframework-${{ needs.pins.outputs.ios-commit }}-${{ needs.pins.outputs.mac-webrtc-release }}-${{ needs.pins.outputs.mac-webrtc-sha256 }}-${{ hashFiles('native/ios/**', 'native/mac/**') }}
 
       - name: Build the Mac Catalyst xcframework
         if: steps.mac-xcframework.outputs.cache-hit != 'true'
-        run: ./native/mac/fetch-mac.sh "${{ needs.pins.outputs.ios-commit }}"
+        run: |
+          ./native/mac/fetch-mac.sh "${{ needs.pins.outputs.ios-commit }}"
+          {
+            echo '#### Mac Catalyst native build'
+            echo '```'
+            cat native/build/mac/pin.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Pack
         run: ./build/BuildNugets.sh "${{ inputs.version }}" apple
@@ -264,18 +294,25 @@ jobs:
           # AOT-compiles, which with the ~27 MB WebRTC framework took 38 minutes of macOS runner
           # time for no added signal. Debug still restores, resolves and links, which is what this
           # check is for. The MAUI workloads are already installed - see the workload step.
-          echo "::group::sample net9.0-android35.0"
-          dotnet build samples/AntMedia.Net.Sample \
-            -c Debug -f net9.0-android35.0 \
-            -p:AntMediaPackageVersion="${{ inputs.version }}"
-          echo "::endgroup::"
+          # net8 legs too: .NET 8 is a headline target ("still where a large share of MAUI apps
+          # are") and nothing else in CI restores or compiles its assets — the package tests
+          # only inspect bytes and the device tests run net10.
+          for tfm in net8.0-android34.0 net9.0-android35.0; do
+            echo "::group::sample ${tfm}"
+            dotnet build samples/AntMedia.Net.Sample \
+              -c Debug -f "${tfm}" \
+              -p:AntMediaPackageVersion="${{ inputs.version }}"
+            echo "::endgroup::"
+          done
 
-          echo "::group::sample net9.0-ios18.0"
-          dotnet build samples/AntMedia.Net.Sample \
-            -c Debug -f net9.0-ios18.0 \
-            -p:RuntimeIdentifier=iossimulator-arm64 \
-            -p:AntMediaPackageVersion="${{ inputs.version }}"
-          echo "::endgroup::"
+          for tfm in net8.0-ios18.0 net9.0-ios18.0; do
+            echo "::group::sample ${tfm}"
+            dotnet build samples/AntMedia.Net.Sample \
+              -c Debug -f "${tfm}" \
+              -p:RuntimeIdentifier=iossimulator-arm64 \
+              -p:AntMediaPackageVersion="${{ inputs.version }}"
+            echo "::endgroup::"
+          done
 
           echo "::group::sample net9.0-maccatalyst18.0"
           dotnet build samples/AntMedia.Net.Sample \

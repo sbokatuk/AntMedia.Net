@@ -58,10 +58,12 @@ jobs:
     environment: nuget.org
     permissions:
       # contents: write creates the GitHub release; id-token: write lets the job request the OIDC
-      # token that nuget.org exchanges for a short-lived API key. Without the latter the token
-      # request fails silently and the login step gets no key.
+      # token that nuget.org exchanges for a short-lived API key (without it the token request
+      # fails silently and the login step gets no key); attestations: write records the build
+      # provenance for the packages.
       contents: write
       id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
@@ -80,6 +82,16 @@ jobs:
         with:
           name: nuget-packages
           path: artifacts
+
+      # Signed provenance for exactly the bytes about to be pushed: consumers can verify with
+      # `gh attestation verify <package> --repo <this repo>` that a package on nuget.org came
+      # from this workflow and not from someone's laptop.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            artifacts/*.nupkg
+            artifacts/*.snupkg
 
       # nuget.org is published to first: a GitHub release that links to packages which failed to
       # upload would be worse than a release that is created a moment late.

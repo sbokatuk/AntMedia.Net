@@ -1,8 +1,10 @@
 name: pull request
 
+# 'labeled' is in the list so applying the publish-beta label triggers a run that can publish;
+# without it the label would only take effect on the next push.
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: pr-${{ github.event.number }}
@@ -40,9 +42,13 @@ jobs:
     name: publish beta to nuget.org
     needs: [version, build]
     runs-on: ubuntu-latest
-    # Forked pull requests get no OIDC token for this repository, so the exchange would fail with
-    # a confusing error. Those PRs still build and test; only the publish step is skipped.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Two gates. Forked pull requests get no OIDC token for this repository, so the exchange
+    # would fail with a confusing error; those PRs still build and test. And publishing is opt-in
+    # via the publish-beta label: nuget.org versions are permanent (unlist-only), so every push
+    # to an open PR minting a public beta would pollute the version list for no benefit.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && contains(github.event.pull_request.labels.*.name, 'publish-beta')
     # Must match the Environment on the nuget.org trusted publishing policy for this workflow.
     # Note that trusted publishing policies are per workflow file, so this job needs its own
     # policy on nuget.org pointing at pr.yml — the release.yml policy will not match it.
