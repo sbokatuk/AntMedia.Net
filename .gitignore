@@ -399,6 +399,9 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 
+# Claude Code per-user local settings
+.claude/settings.local.json
+
 # AntMedia.Net
 # Packed output. The directory itself is tracked so the local-artifacts NuGet source in
 # NuGet.config resolves before anything has been packed.

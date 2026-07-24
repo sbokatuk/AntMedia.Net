@@ -101,10 +101,12 @@ def unexpected_assets(
     """Assets in ADDITIONAL that the merge would silently drop.
 
     The merge deliberately carries only lib/<tfm>/ trees, because that is the only place these
-    packages put per-framework payload today. If a future pass ever emits buildTransitive/,
-    runtimes/, ref/ or anything else unique to it, dropping it with a green build would be the
-    worst outcome - so it is an error instead. Packaging plumbing that legitimately differs
-    between passes (the psmdcp has a fresh guid every pack) is exempt.
+    packages put *per-framework* payload. The Apple bindings' native/ trees and buildTransitive/
+    targets are framework-agnostic and identical in both passes, so PRIMARY's copy already covers
+    them - same-named entries are not "unique to ADDITIONAL" and pass through here untouched. If
+    a future pass ever emits runtimes/, ref/ or anything else genuinely unique to it, dropping it
+    with a green build would be the worst outcome - so it is an error instead. Packaging plumbing
+    that legitimately differs between passes (the psmdcp has a fresh guid every pack) is exempt.
     """
     return sorted(
         name

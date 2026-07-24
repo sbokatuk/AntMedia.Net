@@ -1,0 +1,32 @@
+<Project>
+
+  <!--
+    Ships as buildTransitive/AntMedia.Net.iOS.targets, so NuGet imports it into every project
+    that references this package - directly or through AntMedia.Net.Maui -> AntMedia.Net. That
+    reach is what lets the package carry ONE copy of the xcframeworks (under native/) instead of
+    a NoBindingEmbedding sidecar beside the assembly in every lib/<tfm>/; see the csproj for the
+    whole story.
+
+    Only app-shaped projects get the items. The frameworks are dynamic, so the one build that
+    needs them is the one that links and bundles an app. For a library in between, NativeReference
+    would instead trigger the Apple SDK's binding-resource packaging (it is conditioned on
+    NoBindingEmbedding alone, not on being a binding project) and copy the ~27 MB payload into
+    that library's own build output - and the app imports this file itself anyway.
+  -->
+  <ItemGroup Condition="'$(TargetPlatformIdentifier)' == 'iOS' And ('$(OutputType)' == 'Exe' Or '$(IsAppExtension)' == 'true')">
+    <NativeReference Include="$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'native', 'WebRTCiOSSDK.xcframework'))">
+      <Kind>Framework</Kind>
+    </NativeReference>
+
+    <!--
+      Ant Media's build of libwebrtc. WebRTCiOSSDK links against it, so it has to ship alongside;
+      the Frameworks list is what libwebrtc itself dlopens. Same metadata as the NativeReference
+      in the csproj - keep the two in step.
+    -->
+    <NativeReference Include="$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)', '..', 'native', 'WebRTC.xcframework'))">
+      <Kind>Framework</Kind>
+      <Frameworks>AVFoundation AudioToolbox CoreAudio CoreMedia CoreVideo CoreGraphics VideoToolbox Metal MetalKit</Frameworks>
+    </NativeReference>
+  </ItemGroup>
+
+</Project>

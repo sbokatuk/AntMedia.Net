@@ -55,25 +55,12 @@
   </ItemGroup>
 
   <!--
-    How the frameworks reach the consuming app.
-
-    Both are *dynamic* frameworks, so they cannot be linked into this assembly: they have to be
-    present when the app itself is linked and bundled, or the build fails with
-
-        Undefined symbols for architecture arm64:
-          "_OBJC_CLASS_$_AMSClient", referenced from: <initial-undefines>
-
-    because the registrar passes -u for every bound Objective-C class while nothing supplies them.
-
-    Declaring them as NativeReference here is what handles that. With NoBindingEmbedding the
-    frameworks are packed beside the assembly as <name>.resources.zip, once per target framework,
-    and the Apple SDK unpacks and links them in whichever app references this package - directly
-    or transitively.
-
-    A package-level build/<id>.targets that re-declared them in the consuming project would be
-    smaller, since it needs only one copy. It does not work: NuGet's default PrivateAssets hides
-    'build' assets from transitive consumers, so an app that gets here through AntMedia.Net.Maui ->
-    AntMedia.Net would never import it, and would fail with exactly the error above.
+    How the frameworks reach the consuming app: the same single-copy layout as AntMedia.Net.iOS -
+    a native/ tree plus buildTransitive/AntMedia.Net.Mac.targets, with the per-target-framework
+    NoBindingEmbedding sidecars stripped from the package. The NativeReferences here still serve
+    this repository's own builds (and ProjectReference consumers) through the build-output
+    sidecar. See AntMedia.Net.iOS.csproj for the full reasoning, including why buildTransitive/
+    works where plain build/ could not.
   -->
 
   <ItemGroup>
@@ -99,6 +86,20 @@
   <ItemGroup>
     <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+
+    <!-- Single payload copy + consumer wiring; see AntMedia.Net.iOS.csproj. -->
+    <None Include="lib/WebRTCiOSSDK.xcframework/**" Exclude="lib/**/.DS_Store"
+          Pack="true" PackagePath="native/WebRTCiOSSDK.xcframework/" Visible="false" />
+    <None Include="lib/WebRTC.xcframework/**" Exclude="lib/**/.DS_Store"
+          Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
+    <None Include="AntMedia.Net.Mac.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
+
+  <!-- Strip the per-target-framework sidecars at pack time; see AntMedia.Net.iOS.csproj. -->
+  <Target Name="_ExcludeBindingResourcesFromPackage" AfterTargets="_IncludeBindingResourcesInNuGetPackage">
+    <ItemGroup>
+      <TfmSpecificPackageFile Remove="@(_AppleBindingResource)" />
+    </ItemGroup>
+  </Target>
 
 </Project>

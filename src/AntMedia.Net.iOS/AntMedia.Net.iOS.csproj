@@ -56,15 +56,24 @@
 
     because the registrar passes -u for every bound Objective-C class while nothing supplies them.
 
-    Declaring them as NativeReference here is what handles that. With NoBindingEmbedding the
-    frameworks are packed beside the assembly as <name>.resources.zip, once per target framework,
-    and the Apple SDK unpacks and links them in whichever app references this package - directly
-    or transitively.
+    Declaring them as NativeReference here handles the builds that happen in this repository:
+    with NoBindingEmbedding the Apple SDK writes them beside the built assembly as a
+    <name>.resources sidecar, which is what a ProjectReference consumer links from.
 
-    A package-level build/<id>.targets that re-declared them in the consuming project would be
-    smaller, since it needs only one copy. It does not work: NuGet's default PrivateAssets hides
-    'build' assets from transitive consumers, so an app that gets here through AntMedia.Net.Maui ->
-    AntMedia.Net would never import it, and would fail with exactly the error above.
+    The *package* deliberately does not ship that sidecar. The SDK's default is to pack it into
+    every lib/<tfm>/, which means one ~27 MB payload per target framework - three copies after
+    the two-band merge. Instead, _ExcludeBindingResourcesFromPackage below strips the sidecars at
+    pack time, and the package carries a single copy under native/ plus
+    buildTransitive/AntMedia.Net.iOS.targets, which re-declares these NativeReferences in every
+    consuming app.
+
+    buildTransitive/, not build/ - the distinction matters and cost a wrong conclusion here once
+    already. Assets in build/ are hidden from transitive consumers by NuGet's default
+    PrivateAssets (an app consuming this through AntMedia.Net.Maui -> AntMedia.Net would never
+    import the targets and would fail with exactly the error above). buildTransitive/ is a
+    separate asset class that exists precisely to survive that default: it flows through
+    intermediate packages unless a consumer opts out with PrivateAssets="all" - which would strip
+    lib/ too, so the sidecar layout was no more robust to it.
   -->
 
   <ItemGroup>
@@ -99,6 +108,30 @@
     <None Include="../../assets/icon.png" Pack="true" PackagePath="/" Visible="false" />
     <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
 
+    <!--
+      The single native payload copy and the targets file that wires it into consumers - see the
+      comment above the NativeReferences. Collected once by the outer pack evaluation, so the
+      payload lands in the package exactly once regardless of how many target frameworks build.
+    -->
+    <None Include="lib/WebRTCiOSSDK.xcframework/**" Exclude="lib/**/.DS_Store"
+          Pack="true" PackagePath="native/WebRTCiOSSDK.xcframework/" Visible="false" />
+    <None Include="lib/WebRTC.xcframework/**" Exclude="lib/**/.DS_Store"
+          Pack="true" PackagePath="native/WebRTC.xcframework/" Visible="false" />
+    <None Include="AntMedia.Net.iOS.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
+
+  <!--
+    The Apple SDK packs the NoBindingEmbedding sidecar into lib/<tfm>/ for every target framework
+    (_IncludeBindingResourcesInNuGetPackage - same target and item names in both SDK bands, .zip
+    or directory shape alike). Removing what it just added is the supported seam it leaves: there
+    is no property to turn it off. The build-output sidecar is untouched. If the SDK ever renames
+    the target this becomes a silent no-op - the package layout tests assert lib/<tfm>/ stays
+    payload-free, so a rename fails the package tests rather than shipping ~80 MB quietly.
+  -->
+  <Target Name="_ExcludeBindingResourcesFromPackage" AfterTargets="_IncludeBindingResourcesInNuGetPackage">
+    <ItemGroup>
+      <TfmSpecificPackageFile Remove="@(_AppleBindingResource)" />
+    </ItemGroup>
+  </Target>
 
 </Project>
