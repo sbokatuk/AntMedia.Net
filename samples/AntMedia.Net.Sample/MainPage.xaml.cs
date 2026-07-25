@@ -17,7 +17,15 @@ public partial class MainPage : ContentPage
     public MainPage()
     {
         InitializeComponent();
+
+        // Last-used values, so a repeated test is button presses rather than typing. Saved only
+        // when a session actually starts - see StartAsync - so a typo'd url is never remembered.
+        ServerUrlEntry.Text = Preferences.Default.Get(ServerUrlPreference, string.Empty);
+        StreamIdEntry.Text = Preferences.Default.Get(StreamIdPreference, string.Empty);
     }
+
+    private const string ServerUrlPreference = "server-url";
+    private const string StreamIdPreference = "stream-id";
 
     /// <summary>
     /// Built lazily rather than in the constructor: on Android the SDK needs the current activity,
@@ -144,6 +152,9 @@ public partial class MainPage : ContentPage
                     Append($"in the call '{streamId}'");
                     break;
             }
+
+            Preferences.Default.Set(ServerUrlPreference, ServerUrlEntry.Text?.Trim() ?? string.Empty);
+            Preferences.Default.Set(StreamIdPreference, streamId);
 
             SetStreaming(true);
         }
