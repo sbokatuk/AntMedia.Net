@@ -55,9 +55,44 @@ public sealed partial class AntMediaClient
 
         if (view is not null)
         {
+            // The SDK's renderer scales to fill its container and UIKit does not clip subviews
+            // by default, so a frame whose aspect (or rotation, see below) mismatches the
+            // container paints far outside it — over the rest of the page.
+            view.ClipsToBounds = true;
+
             _client.SetLocalView(view, ToContentMode(scaling));
+
+#if MACCATALYST
+            PinLocalRotation(view);
+#endif
         }
     }
+
+#if MACCATALYST
+    /// <summary>
+    /// The capturer stamps every frame with the device orientation, which a Mac does not have:
+    /// UIDevice reports unknown, the SDK assumes portrait, and the webcam's landscape frames
+    /// render rotated 90°. The renderer honours rotationOverride, which is reached by selector
+    /// so this package does not need to bind libwebrtc's types. Local preview only — remote
+    /// frames carry their sender's real rotation and must keep it.
+    /// </summary>
+    private static void PinLocalRotation(UIView container)
+    {
+        var setRotationOverride = new ObjCRuntime.Selector("setRotationOverride:");
+
+        // The SDK embeds its renderer synchronously, so it is in the subviews by now.
+        foreach (var subview in container.Subviews)
+        {
+            if (subview.RespondsToSelector(setRotationOverride))
+            {
+                // A long-backed NSNumber: the renderer reads the value with getValue:, which
+                // copies the number's own width — an int-backed one would underfill the
+                // NSInteger-sized rotation.
+                subview.PerformSelector(setRotationOverride, Foundation.NSNumber.FromLong(0));
+            }
+        }
+    }
+#endif
 
     /// <summary>
     /// Renders the stream being played into <paramref name="view" />, letterboxed to fit. Null
@@ -74,6 +109,10 @@ public sealed partial class AntMediaClient
 
         if (view is not null)
         {
+            // Same containment rule as the local view; rotation is left alone here, because
+            // remote frames carry the sender's real rotation.
+            view.ClipsToBounds = true;
+
             _client.SetRemoteView(view, ToContentMode(scaling));
         }
     }
@@ -87,17 +126,62 @@ public sealed partial class AntMediaClient
 
     private void PublishCore(string streamId, string mainTrackId)
     {
+        // The interface promises that starting a new operation ends the previous session.
+        // Android gets that from Build(), which stops before it constructs; without the same
+        // here, a second Publish collides with this client's own live stream server-side —
+        // streamIdInUse against yourself — and tears both sessions down.
+        StopCore();
         Configure(streamId, AMSMode.Publish);
         _client.Publish(streamId, _options.Token, mainTrackId);
     }
 
     private void PlayCore(string streamId)
     {
+        StopCore();
         Configure(streamId, AMSMode.Play);
         _client.Play(streamId, _options.Token);
     }
 
+    /// <summary>
+    /// True while the current session is a p2p join. The Apple SDK's joined acknowledgement is
+    /// swallowed internally (an empty private handler), so the join operation completes on the
+    /// first sign of the other peer instead — this flag is what tells the delegate bridge that
+    /// remote media should complete the pending operation.
+    /// </summary>
+    private bool _joining;
+
+    private void JoinCore(string streamId)
+    {
+        StopCore();
+
+        // No Configure(): the SDK's join() runs its own initPeerConnection with the join mode,
+        // and a second init with a different mode would fight it. Only the settings are applied.
+        ApplyOptions();
+        _sessionStreamId = streamId;
+        _joining = true;
+
+        _client.Join(streamId);
+    }
+
+    /// <summary>
+    /// The stream this half most recently started. Owned here rather than read from the shared
+    /// <see cref="StreamId" />, because the shared property is reassigned to the *new* id before
+    /// the platform code runs — a restart would otherwise stop the wrong session.
+    /// </summary>
+    private string? _sessionStreamId;
+
     private void Configure(string streamId, AMSMode mode)
+    {
+        ApplyOptions();
+        _sessionStreamId = streamId;
+        _joining = false;
+
+        // Opens the camera and builds the peer connection before contacting the server, so the
+        // local preview appears immediately rather than after the round trip.
+        _client.InitPeerConnection(streamId, mode, _options.Token);
+    }
+
+    private void ApplyOptions()
     {
         _client.SetWebSocketServerUrl(_options.ServerUrl);
         _client.SetEnableDataChannel(_options.DataChannelEnabled);
@@ -113,17 +197,18 @@ public sealed partial class AntMediaClient
         {
             _client.SetMaxVideoBps(Foundation.NSNumber.FromInt64(_options.VideoBitrateKbps * 1000L));
         }
-
-        // Opens the camera and builds the peer connection before contacting the server, so the
-        // local preview appears immediately rather than after the round trip.
-        _client.InitPeerConnection(streamId, mode, _options.Token);
     }
 
     private void StopCore()
     {
-        if (StreamId is not null)
+        _joining = false;
+
+        if (_sessionStreamId is { } id)
         {
-            _client.Stop(StreamId);
+            _sessionStreamId = null;
+            // For a p2p session the SDK's stop(explicit id) routes to leave(), so the one call
+            // covers publish, play and join alike.
+            _client.Stop(id);
         }
     }
 
@@ -178,8 +263,26 @@ public sealed partial class AntMediaClient
 
         public override void Disconnected(string streamId) => owner.RaiseDisconnected(streamId);
 
-        public override void TrackAdded(string trackId, string kind) =>
+        public override void RemoteStreamStarted(string streamId)
+        {
+            // In a p2p call this is the first observable proof the other peer is connected —
+            // the SDK's own joined acknowledgement never reaches the delegate.
+            if (owner._joining)
+            {
+                owner.CompletePending();
+            }
+        }
+
+        public override void TrackAdded(string trackId, string kind)
+        {
+            // Belt to RemoteStreamStarted's braces: whichever arrives first completes the join.
+            if (owner._joining)
+            {
+                owner.CompletePending();
+            }
+
             owner.RaiseTrackAdded(trackId, kind);
+        }
 
         public override void TrackRemoved(string trackId, string kind) =>
             owner.RaiseTrackRemoved(trackId, kind);

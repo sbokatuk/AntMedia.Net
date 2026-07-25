@@ -81,7 +81,7 @@ public sealed partial class AntMediaClient
     private Action? _whenConnected;
 
     private void PublishCore(string streamId, string mainTrackId) =>
-        WhenConnected(publishing: true, streamId, client =>
+        WhenConnected(SessionKind.Publish, streamId, client =>
         {
             if (string.IsNullOrEmpty(mainTrackId))
             {
@@ -104,7 +104,21 @@ public sealed partial class AntMediaClient
         });
 
     private void PlayCore(string streamId) =>
-        WhenConnected(publishing: false, streamId, client => client.Play(streamId));
+        WhenConnected(SessionKind.Play, streamId, client => client.Play(streamId));
+
+    private void JoinCore(string streamId) =>
+        WhenConnected(SessionKind.Join, streamId, client => client.Join(streamId));
+
+    /// <summary>
+    /// What the session renders: a publish shows the local preview, a play the remote stream,
+    /// and a p2p join both at once.
+    /// </summary>
+    private enum SessionKind
+    {
+        Publish,
+        Play,
+        Join,
+    }
 
     /// <summary>
     /// Opens the websocket first and only then publishes or plays.
@@ -120,9 +134,9 @@ public sealed partial class AntMediaClient
     /// Init() opens the socket without requesting a stream, so by the time publish() runs there
     /// is nothing queued for the connect handler to re-send.
     /// </summary>
-    private void WhenConnected(bool publishing, string streamId, Action<NativeClient> start)
+    private void WhenConnected(SessionKind kind, string streamId, Action<NativeClient> start)
     {
-        var client = Build(publishing, streamId);
+        var client = Build(kind, streamId);
 
         _whenConnected = () =>
         {
@@ -133,7 +147,7 @@ public sealed partial class AntMediaClient
         client.Init();
     }
 
-    private NativeClient Build(bool publishing, string streamId)
+    private NativeClient Build(SessionKind kind, string streamId)
     {
         StopCore();
 
@@ -171,13 +185,15 @@ public sealed partial class AntMediaClient
             builder = builder.SetAudioStartBitrate(_options.AudioBitrateKbps);
         }
 
-        // Only the renderer that will actually show something is attached: handing the builder one
-        // that stays empty still initialises an EGL surface for it.
-        if (publishing && _localRenderer is not null)
+        // Only the renderers that will actually show something are attached: handing the builder
+        // one that stays empty still initialises an EGL surface for it. A p2p join shows both
+        // sides at once.
+        if (kind is SessionKind.Publish or SessionKind.Join && _localRenderer is not null)
         {
             builder = builder.SetLocalVideoRenderer(_localRenderer);
         }
-        else if (!publishing && _remoteRenderer is not null)
+
+        if (kind is SessionKind.Play or SessionKind.Join && _remoteRenderer is not null)
         {
             builder = builder.AddRemoteVideoRenderer(_remoteRenderer);
         }
@@ -321,6 +337,16 @@ public sealed partial class AntMediaClient
             if (!Stale)
             {
                 owner.RaiseDisconnected(owner.StreamId ?? string.Empty);
+            }
+        }
+
+        public override void OnJoined(string streamId)
+        {
+            // The p2p join acknowledgement — this side is in the call, media follows when the
+            // other peer arrives.
+            if (!Stale)
+            {
+                owner.CompletePending();
             }
         }
 
