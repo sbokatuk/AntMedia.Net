@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-	<application android:allowBackup="true" android:icon="@mipmap/appicon" android:supportsRtl="true" />
+	<!--
+	  usesCleartextTraffic: Android 9+ blocks plain ws:// (and http://) outright, and testing
+	  against an Ant Media Server on your own LAN - a dev box running the Docker image - is
+	  exactly that. A production app pointed at a wss:// server should drop this.
+	-->
+	<application android:allowBackup="true" android:icon="@mipmap/appicon" android:supportsRtl="true" android:usesCleartextTraffic="true" />
 
 	<uses-permission android:name="android.permission.INTERNET" />
 	<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
