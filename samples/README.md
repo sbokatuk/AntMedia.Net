@@ -13,7 +13,18 @@ wss://your-server:5443/WebRTCAppEE/websocket
 ```
 
 Tap **Publish** to send the device's camera and microphone, or **Play** to view a stream someone
-else is publishing. The panel at the bottom shows the SDK's callbacks as they arrive.
+else is publishing. **Join (P2P)** is the third mode: run the sample on two devices, enter the
+same id on both and tap Join on each — the server only relays signalling and the video flows
+directly between the devices.
+
+The panel at the bottom shows the SDK's callbacks as they arrive.
+
+> **Community edition supports publishing only.** Its websocket handler answers every `play`
+> with `no_stream_exist` — even for a live stream, which is thoroughly confusing the first
+> time — and ignores `join` without answering at all, so Join simply times out against it.
+> Against a community server, test with Publish and watch the result over HLS
+> (`http://<server>:5080/<app>/streams/<id>.m3u8`, or the server's `play.html`); the Play and
+> Join buttons need an Enterprise edition server.
 
 Use a real iPhone (or the Android emulator, whose camera is emulated) for the session buttons.
 On an iOS *simulator* both Publish and Play trap inside the upstream SDK: its `startCapture()`
