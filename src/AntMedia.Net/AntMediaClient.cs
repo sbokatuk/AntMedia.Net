@@ -62,6 +62,10 @@ public sealed partial class AntMediaClient : IAntMediaClient
     public Task PlayAsync(string streamId, CancellationToken cancellationToken = default) =>
         RunAsync(streamId, () => PlayCore(streamId), cancellationToken);
 
+    /// <inheritdoc />
+    public Task JoinAsync(string streamId, CancellationToken cancellationToken = default) =>
+        RunAsync(streamId, () => JoinCore(streamId), cancellationToken);
+
     /// <summary>
     /// Starts an operation and waits for the platform to report that it succeeded.
     ///

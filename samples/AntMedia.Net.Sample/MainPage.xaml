@@ -31,9 +31,17 @@
                                         Scaling="Fit" />
         </Grid>
 
+        <!--
+          Publish/Play stream to and from the server; Join is the peer-to-peer call mode - both
+          devices Join the same id and media flows directly between them. Mind the server
+          edition: the free community server supports WebRTC *publishing only*. Play answers
+          "no stream exists" for everything there, and Join is ignored outright (it times out),
+          so those two buttons need an Enterprise server.
+        -->
         <HorizontalStackLayout Grid.Row="2" Spacing="8" HorizontalOptions="Center">
             <Button x:Name="PublishButton" Text="Publish" Clicked="OnPublishClicked" />
             <Button x:Name="PlayButton" Text="Play" Clicked="OnPlayClicked" />
+            <Button x:Name="JoinButton" Text="Join (P2P)" Clicked="OnJoinClicked" />
             <Button x:Name="StopButton" Text="Stop" Clicked="OnStopClicked" IsEnabled="False" />
         </HorizontalStackLayout>
 

@@ -93,6 +93,26 @@ public interface IAntMediaClient : IDisposable
     Task PlayAsync(string streamId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Joins a peer-to-peer call: both participants call this with the same id, the server only
+    /// relays signalling, and media flows directly between the devices. Requires an Enterprise
+    /// edition server — the community edition's websocket handler ignores the join command
+    /// without answering, so against it this call only ever times out (community supports
+    /// WebRTC publishing only; playback and p2p are Enterprise features).
+    /// </summary>
+    /// <param name="streamId">The call id both participants share.</param>
+    /// <param name="cancellationToken"><inheritdoc cref="PublishAsync" path="/param[@name='cancellationToken']" /></param>
+    /// <remarks>
+    /// When the returned task completes differs per platform, because the SDKs confirm different
+    /// milestones: Android acknowledges the join itself, while the Apple SDK surfaces nothing
+    /// until the other peer connects and media starts. In practice: the first participant's task
+    /// stays pending until the second arrives, so give the waiting side a
+    /// <see cref="AntMediaOptions.Timeout" /> long enough to cover answering — the
+    /// <see cref="TrackAdded" /> event is the moment video can be rendered on every platform.
+    /// </remarks>
+    /// <inheritdoc cref="PublishAsync" />
+    Task JoinAsync(string streamId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Ends the session and releases the camera, microphone and peer connection. Safe to call
     /// when nothing is running. A caller still awaiting <see cref="PublishAsync" /> or
     /// <see cref="PlayAsync" /> gets <see cref="OperationCanceledException" /> immediately.

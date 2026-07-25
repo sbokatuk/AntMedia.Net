@@ -42,5 +42,11 @@
 		<string>audio</string>
 		<string>voip</string>
 	</array>
+
+	<!-- Streaming to a server on your own LAN (a dev box running Ant Media in Docker, say)
+	     triggers iOS 14+'s Local Network permission; this is the text on that prompt. Cleartext
+	     ws:// to a LAN address needs no ATS exception because ATS exempts IP literals. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Used to reach an Ant Media Server running on your local network.</string>
 </dict>
 </plist>

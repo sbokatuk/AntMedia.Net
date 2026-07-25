@@ -41,6 +41,11 @@ public partial class MainPage : ContentPage
             ServerUrl = serverUrl,
             VideoWidth = 640,
             VideoHeight = 480,
+
+            // Generous because of Join: the first participant's JoinAsync stays pending until
+            // the second one presses Join, and walking to the other device takes longer than
+            // the default 30 seconds.
+            Timeout = TimeSpan.FromSeconds(90),
         }.CreateClient();
 
         client.SetLocalView(LocalView);
@@ -68,13 +73,23 @@ public partial class MainPage : ContentPage
         MainThread.BeginInvokeOnMainThread(() => SetStreaming(false));
     }
 
+    private enum SessionMode
+    {
+        Publish,
+        Play,
+        Join,
+    }
+
     private async void OnPublishClicked(object sender, EventArgs e) =>
-        await StartAsync(publish: true);
+        await StartAsync(SessionMode.Publish);
 
     private async void OnPlayClicked(object sender, EventArgs e) =>
-        await StartAsync(publish: false);
+        await StartAsync(SessionMode.Play);
 
-    private async Task StartAsync(bool publish)
+    private async void OnJoinClicked(object sender, EventArgs e) =>
+        await StartAsync(SessionMode.Join);
+
+    private async Task StartAsync(SessionMode mode)
     {
         var streamId = StreamIdEntry.Text?.Trim();
 
@@ -84,8 +99,9 @@ public partial class MainPage : ContentPage
             return;
         }
 
-        // Publishing needs both; playing needs neither, but asking once keeps the sample simple.
-        if (publish && !await RequestCapturePermissionsAsync())
+        // Publishing and a p2p call capture; playing needs neither, but asking once keeps the
+        // sample simple.
+        if (mode != SessionMode.Play && !await RequestCapturePermissionsAsync())
         {
             Append("camera and microphone permission denied");
             return;
@@ -97,18 +113,38 @@ public partial class MainPage : ContentPage
         {
             var client = Client();
 
-            // Completes when the server confirms, so there is no callback to wire up for the
-            // common case, and a failure to start surfaces as an exception right here.
-            if (publish)
+            // A press while a session is running means "restart": end the old session cleanly
+            // first. The client would do this itself, but doing it here too makes the log tell
+            // the story and keeps the buttons honest.
+            if (client.IsStreaming)
             {
-                await client.PublishAsync(streamId);
-            }
-            else
-            {
-                await client.PlayAsync(streamId);
+                client.Stop();
+                Append("stopped the previous session");
             }
 
-            Append(publish ? $"publishing {streamId}" : $"playing {streamId}");
+            // Completes when the server confirms, so there is no callback to wire up for the
+            // common case, and a failure to start surfaces as an exception right here.
+            switch (mode)
+            {
+                case SessionMode.Publish:
+                    await client.PublishAsync(streamId);
+                    Append($"publishing {streamId}");
+                    break;
+
+                case SessionMode.Play:
+                    await client.PlayAsync(streamId);
+                    Append($"playing {streamId}");
+                    break;
+
+                case SessionMode.Join:
+                    // The first participant's JoinAsync waits for the second, so the log says
+                    // what to do rather than looking stuck.
+                    Append($"joining call '{streamId}' — press Join on the other device too");
+                    await client.JoinAsync(streamId);
+                    Append($"in the call '{streamId}'");
+                    break;
+            }
+
             SetStreaming(true);
         }
         catch (AntMediaException exception)
@@ -149,12 +185,14 @@ public partial class MainPage : ContentPage
     {
         PublishButton.IsEnabled = !busy;
         PlayButton.IsEnabled = !busy;
+        JoinButton.IsEnabled = !busy;
     }
 
     private void SetStreaming(bool streaming)
     {
         PublishButton.IsEnabled = !streaming;
         PlayButton.IsEnabled = !streaming;
+        JoinButton.IsEnabled = !streaming;
         StopButton.IsEnabled = streaming;
     }
 
