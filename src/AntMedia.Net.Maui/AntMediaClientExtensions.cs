@@ -61,6 +61,11 @@ public static class AntMediaClientExtensions
             implementation.SetLocalRenderer(PlatformView(view));
 #elif IOS || MACCATALYST
             implementation.SetLocalView(PlatformView(view), view.Scaling ?? AntMediaVideoScaling.Fill);
+#else
+            // No SDK on this platform, so there is no renderer to attach to. Deliberately silent
+            // rather than throwing: attaching a view is setup, and setup running on Windows is
+            // exactly what lets the page build. The session call is where it says no.
+            _ = implementation;
 #endif
         });
     }
@@ -81,6 +86,9 @@ public static class AntMediaClientExtensions
             implementation.SetRemoteRenderer(PlatformView(view));
 #elif IOS || MACCATALYST
             implementation.SetRemoteView(PlatformView(view), view.Scaling ?? AntMediaVideoScaling.Fit);
+#else
+            // See SetLocalView: nothing to attach to, and saying so here would break page setup.
+            _ = implementation;
 #endif
         });
     }

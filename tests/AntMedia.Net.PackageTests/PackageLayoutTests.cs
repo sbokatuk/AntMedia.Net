@@ -188,6 +188,7 @@ public class PackageLayoutTests
         from tfm in Packages.AndroidTargetFrameworks
             .Concat(Packages.IosTargetFrameworks)
             .Concat(Packages.MacCatalystTargetFrameworks)
+            .Concat(Packages.FallbackTargetFrameworks)
         select new object[] { packageId, tfm };
 
     [SkippableTheory]

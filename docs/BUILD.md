@@ -48,6 +48,7 @@ the current target framework and the previous one only. Verified on this reposit
 | --- | --- | --- |
 | Android | `net8.0-android34.0`, `net9.0-android35.0` | `net10.0-android36.0` |
 | iOS | `net8.0-ios18.0`, `net9.0-ios18.0` | `net10.0-ios26.0` |
+| plain | `net8.0`, `net9.0` | `net10.0` |
 
 So `BuildNugets.sh` packs each project twice — once under the SDK `global.json` pins, once from a
 scratch directory whose own `global.json` selects the .NET 10 SDK — and `merge-packages.py`
@@ -57,6 +58,21 @@ nuspec dependency groups.
 The platform version in each target framework is pinned deliberately. Bare `net8.0-android`
 resolves to `android21.0`, which produces a binding assembly with no `.aar` payload — it compiles,
 packs and installs, and fails only at runtime.
+
+### The plain frameworks
+
+The two cross-platform packages also carry a plain `net8.0`/`net9.0`/`net10.0` assembly —
+`AntMediaFallbackTargetFrameworks`, compiled from `Platforms/Unsupported` with no binding
+dependency. It streams nothing: every session call throws `PlatformNotSupportedException`, and
+`AntMediaVideoView` is an empty `ContentView` with no handler.
+
+It exists because a NuGet package that resolves *nothing* for a target framework fails restore for
+the entire project, not just that leg — and `dotnet new maui` on a Windows machine adds
+`net*-windows` to `TargetFrameworks` by default. Without this asset, a developer on Windows
+building the Android leg (which needs no Mac and no Apple SDK) hit `NU1202` and had to edit their
+`TargetFrameworks` before anything would restore. The bindings themselves get no plain framework:
+they are the native payload, so there is nothing to put in one, and the plain dependency groups
+pull none of them in.
 
 ## Native SDKs
 

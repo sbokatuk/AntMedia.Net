@@ -20,6 +20,10 @@ public class MetapackageTests
         Packages.AndroidTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.Android)
             .Concat(Packages.IosTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.IOS))
             .Concat(Packages.MacCatalystTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)Packages.Mac))
+            // The plain frameworks must resolve to *no* binding: they are what a Windows or console
+            // consumer lands on, and asking one of those to install an Android .aar or an Apple
+            // xcframework would trade a restore error for a stranger one.
+            .Concat(Packages.FallbackTargetFrameworks.ToDictionary(tfm => tfm, _ => (string?)null))
             .ToDictionary(pair => pair.Key, pair => pair.Value);
 
     private static Dictionary<string, XElement> DependencyGroups()
@@ -78,6 +82,41 @@ public class MetapackageTests
                 dependencies.Contains(expectedId),
                 $"{Packages.Meta} group '{tfm}' should depend on {expectedId} but depends on " +
                 $"[{string.Join(", ", dependencies)}].");
+        }
+    }
+
+    /// <summary>
+    /// The plain-framework assembly must be the one with no platform half in it. Compiling an
+    /// Android or Apple half into it would not fail the build — the conditions in
+    /// AntMedia.Net.csproj select by platform identifier, and getting them wrong yields an
+    /// assembly that references a binding the plain dependency group does not install, which
+    /// fails at load time in a consumer's app rather than here.
+    /// </summary>
+    [SkippableTheory]
+    [MemberData(nameof(Packages.FallbackFrameworks), MemberType = typeof(Packages))]
+    public void Metapackage_fallback_assembly_has_no_platform_behind_it(string tfm)
+    {
+        Skip.IfNot(Packages.Exists(Packages.Meta), "the metapackage is only built on macOS");
+
+        using var package = Packages.OpenPackage(Packages.Meta);
+        using var assembly = Packages.ReadEntry(package, $"lib/{tfm}/AntMedia.Net.dll");
+        using var api = new AssemblyApi(assembly);
+
+        Assert.Contains("AntMedia.Net.AntMediaClient", api.PublicTypes);
+
+        // Positive evidence that Platforms/Unsupported was the half compiled: it is the only one
+        // that refuses a session outright.
+        Assert.True(
+            api.ReferencedTypes.Contains("PlatformNotSupportedException"),
+            $"{Packages.Meta} ({tfm}) never throws PlatformNotSupportedException, so it was not " +
+            "built from Platforms/Unsupported.");
+
+        foreach (var native in new[] { "WebRTCClientBuilder", "AMSClient", "UIView", "SurfaceViewRenderer" })
+        {
+            Assert.True(
+                !api.ReferencedTypes.Contains(native),
+                $"{Packages.Meta} ({tfm}) references {native}, which belongs to a platform half. " +
+                "The plain frameworks pull in no binding, so that type will not be there at runtime.");
         }
     }
 
