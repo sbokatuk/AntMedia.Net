@@ -18,12 +18,24 @@ namespace AntMedia.Net.Maui;
 /// the UIView you hand it.
 /// </summary>
 /// <remarks>
+/// <para>
 /// On Android the native view is a <c>SurfaceView</c>, which does not composite like ordinary
 /// views: to overlap one video view on top of another — the classic small-preview-over-remote
 /// layout — set <see cref="IsMediaOverlay" /> on the view on top, or the two will fight over one
 /// z-position and mis-layer silently.
+/// </para>
+/// <para>
+/// On a platform with no Ant Media SDK — Windows — this is an empty <c>ContentView</c> instead,
+/// and its properties do nothing. A page that includes one still lays out and appears; without a
+/// built-in handler behind it, MAUI would instead throw "Handler not found" the moment the page
+/// was shown.
+/// </para>
 /// </remarks>
+#if ANDROID || IOS || MACCATALYST
 public class AntMediaVideoView : View
+#else
+public class AntMediaVideoView : ContentView
+#endif
 {
     /// <summary>Bindable <see cref="Scaling" />.</summary>
     public static readonly BindableProperty ScalingProperty = BindableProperty.Create(
@@ -147,6 +159,11 @@ public partial class AntMediaVideoViewHandler : ViewHandler<AntMediaVideoView, U
 
 #endif
 
+// The handler as a whole is absent on a platform with no SDK: there is no native renderer for it
+// to drive, and no base class either - ViewHandler needs a platform view type. AntMediaVideoView
+// falls back to ContentView there precisely so that nothing needs one.
+#if ANDROID || IOS || MACCATALYST
+
 /// <summary>
 /// Shared half of the handler. The platform half above declares the base class, which is what
 /// binds <see cref="AntMediaVideoView" /> to that platform's native view type.
@@ -167,3 +184,5 @@ public partial class AntMediaVideoViewHandler
     {
     }
 }
+
+#endif

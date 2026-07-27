@@ -155,12 +155,24 @@ snippets create the client once the view exists rather than in a constructor —
 `Activity` is not usable before `OnCreate`, and on Apple the view has no window before
 `ViewDidAppear`.
 
-`AntMedia.Net.Maui` has no Windows target, because the Ant Media SDKs have none. The default
-MAUI template also targets `net*-windows` on Windows machines, so condition the reference:
+### Windows
 
-```xml
-<PackageReference Include="AntMedia.Net.Maui" Version="..."
-    Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) != 'windows'" />
+Streaming needs Android, iOS or Mac Catalyst: Ant Media publishes WebRTC SDKs for Android and iOS
+only, so there is no Windows library to bind. A Windows target still **restores, compiles and
+runs**, though — the packages carry a plain `net8.0`/`net9.0`/`net10.0` assembly for it. That
+matters because `dotnet new maui` on a Windows machine adds `net*-windows` to `TargetFrameworks`,
+and a package with nothing to resolve there fails restore for the *whole* project, Android leg
+included. No conditional `PackageReference` needed.
+
+What that assembly does: `UseAntMedia()`, `CreateClient()`, `SetLocalView` and the view itself all
+work, so shared code and XAML compile untouched. `AntMediaVideoView` is an empty `ContentView`
+there, and `PublishAsync`, `PlayAsync` and `JoinAsync` throw `PlatformNotSupportedException`.
+Guard the calls, not the reference:
+
+```csharp
+#if ANDROID || IOS || MACCATALYST
+    await client.PublishAsync(streamId);
+#endif
 ```
 
 Capture permissions are the app's own responsibility either way: `CAMERA` and `RECORD_AUDIO` in
@@ -172,8 +184,8 @@ sandboxed Mac Catalyst app.
 
 | Package | What it is | Target frameworks |
 | --- | --- | --- |
-| `AntMedia.Net.Maui` | MAUI video view, handlers, and the Android `Activity` plumbing | net8.0, net9.0, net10.0 (android + ios + maccatalyst) |
-| `AntMedia.Net` | The cross-platform client: `IAntMediaClient`, options, events, async | net8.0, net9.0, net10.0 (android + ios + maccatalyst) |
+| `AntMedia.Net.Maui` | MAUI video view, handlers, and the Android `Activity` plumbing | net8.0, net9.0, net10.0 (android + ios + maccatalyst, plus plain) |
+| `AntMedia.Net` | The cross-platform client: `IAntMediaClient`, options, events, async | net8.0, net9.0, net10.0 (android + ios + maccatalyst, plus plain) |
 | `AntMedia.Net.Android` | The raw binding to the Ant Media Android SDK | `net8.0-android34.0`, `net9.0-android35.0`, `net10.0-android36.0` |
 | `AntMedia.Net.iOS` | The raw binding to the Ant Media iOS SDK | `net8.0-ios18.0`, `net9.0-ios18.0`, `net10.0-ios26.0` |
 | `AntMedia.Net.Mac` | The same binding, built for Mac Catalyst (Apple Silicon) | `net8.0-maccatalyst18.0`, `net9.0-maccatalyst18.0`, `net10.0-maccatalyst26.0` |

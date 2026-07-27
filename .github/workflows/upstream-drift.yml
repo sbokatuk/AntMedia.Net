@@ -2,13 +2,20 @@ name: upstream drift
 
 # The pins in Directory.Build.props are updated by hand, and nothing else watches upstream: the
 # iOS SDK publishes no versions at all, so without this a year of upstream fixes would go
-# unnoticed. Also re-verifies the pinned libwebrtc release asset weekly — GitHub release assets
-# are mutable, and a changed hash under an unchanged version is a tamper signal, not a routine
-# update.
+# unnoticed. Also re-verifies the pinned libwebrtc release asset — GitHub release assets are
+# mutable, and a changed hash under an unchanged version is a tamper signal, not a routine update.
+#
+# Reports one issue per platform, so the title says where the change is and Android and Mac
+# re-pins — separate changes, usually made at different times — are tracked separately rather
+# than piling into one thread.
+#
+# Runs daily. That only stays readable because a standing drift is silent: every report carries a
+# fingerprint of the drift it describes, so an unchanged fingerprint posts nothing, a changed one
+# adds a comment, and drift going away closes the issue.
 
 on:
   schedule:
-    - cron: '17 6 * * 1' # Mondays, 06:17 UTC — off the full hour to dodge the cron rush.
+    - cron: '17 6 * * *' # Daily, 06:17 UTC — off the full hour to dodge the cron rush.
   workflow_dispatch:
 
 permissions:
@@ -25,72 +32,185 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Compare
-        id: compare
-        run: |
-          . ./build/pins.sh
-          drift=""
-          note() { drift="${drift}- $1"$'\n'; }
-
-          # Android: the pinned tag must still resolve to the pinned commit (the ^{} form covers
-          # an annotated tag), and a newer v* tag is worth knowing about.
-          tag_sha="$(git ls-remote "${ANTMEDIA_ANDROID_REPOSITORY}" "refs/tags/${ANTMEDIA_ANDROID_TAG}" | cut -f1)"
-          peeled_sha="$(git ls-remote "${ANTMEDIA_ANDROID_REPOSITORY}" "refs/tags/${ANTMEDIA_ANDROID_TAG}^{}" | cut -f1)"
-          effective="${peeled_sha:-${tag_sha}}"
-          if [ -z "${effective}" ]; then
-            note "Android tag \`${ANTMEDIA_ANDROID_TAG}\` no longer exists upstream."
-          elif [ "${effective}" != "${ANTMEDIA_ANDROID_COMMIT}" ]; then
-            note "**Android tag \`${ANTMEDIA_ANDROID_TAG}\` was re-pointed**: now \`${effective}\`, pinned \`${ANTMEDIA_ANDROID_COMMIT}\`. Treat as suspicious until explained."
-          fi
-
-          latest_tag="$(git ls-remote --tags "${ANTMEDIA_ANDROID_REPOSITORY}" 'refs/tags/v*' \
-            | awk -F/ '$NF !~ /\^\{\}$/ { print $NF }' | sort -V | tail -1)"
-          if [ -n "${latest_tag}" ] && [ "${latest_tag}" != "${ANTMEDIA_ANDROID_TAG}" ] \
-            && [ "$(printf '%s\n%s\n' "${ANTMEDIA_ANDROID_TAG}" "${latest_tag}" | sort -V | tail -1)" = "${latest_tag}" ]; then
-            note "Android SDK has a newer tag: \`${latest_tag}\` (pinned \`${ANTMEDIA_ANDROID_TAG}\`)."
-          fi
-
-          # iOS: no versions upstream, so the only signal is master moving past the pinned commit.
-          ios_head="$(git ls-remote "${ANTMEDIA_IOS_REPOSITORY}" HEAD | cut -f1)"
-          if [ -n "${ios_head}" ] && [ "${ios_head}" != "${ANTMEDIA_IOS_COMMIT}" ]; then
-            note "iOS SDK master moved: \`${ios_head}\` (pinned \`${ANTMEDIA_IOS_COMMIT}\`)."
-          fi
-
-          # libwebrtc: a newer release is routine; the pinned asset's bytes changing is not.
-          latest_release="$(gh api repos/stasel/WebRTC/releases/latest --jq .tag_name || true)"
-          if [ -n "${latest_release}" ] && [ "${latest_release}" != "${ANTMEDIA_MAC_WEBRTC_RELEASE}" ]; then
-            note "stasel/WebRTC has a newer release: \`${latest_release}\` (pinned \`${ANTMEDIA_MAC_WEBRTC_RELEASE}\`)."
-          fi
-
-          actual_sha="$(curl -sfL --retry 3 "${ANTMEDIA_MAC_WEBRTC_URL}" | shasum -a 256 | cut -d' ' -f1 || true)"
-          if [ -z "${actual_sha}" ]; then
-            note "Could not download \`${ANTMEDIA_MAC_WEBRTC_URL}\` to re-verify its hash."
-          elif [ "${actual_sha}" != "${ANTMEDIA_MAC_WEBRTC_SHA256}" ]; then
-            note "**The pinned libwebrtc asset's bytes changed**: sha256 now \`${actual_sha}\`, pinned \`${ANTMEDIA_MAC_WEBRTC_SHA256}\`. The version did not change, so treat as suspicious."
-          fi
-
-          if [ -n "${drift}" ]; then
-            {
-              echo 'drift<<EOF'
-              printf '%s' "${drift}"
-              echo 'EOF'
-            } >> "$GITHUB_OUTPUT"
-            printf '%s' "${drift}" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "All pins match upstream." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Open or update the drift issue
-        if: steps.compare.outputs.drift != ''
-        run: |
-          title="Upstream drift: native SDK pins are behind or moved"
-          body="$(printf 'Detected by the weekly check on %s:\n\n%s\nPins live in Directory.Build.props; docs/BUILD.md covers re-pinning.' \
-            "$(date -u +%Y-%m-%d)" "${{ steps.compare.outputs.drift }}")"
-
-          existing="$(gh issue list --state open --search "in:title \"Upstream drift\"" --json number --jq '.[0].number' || true)"
-          if [ -n "${existing}" ] && [ "${existing}" != "null" ]; then
-            gh issue comment "${existing}" --body "${body}"
-          else
-            gh issue create --title "${title}" --body "${body}"
-          fi
         env:
-          GH_TOKEN: ${{ github.token }}
+          DRIFT_DIR: ${{ runner.temp }}/drift
+        run: |
+          set -euo pipefail
+          . ./build/pins.sh
+          mkdir -p "${DRIFT_DIR}"
+
+          # One file per platform — the reporting step turns each into its own issue, so every
+          # note has to say which platform it belongs to.
+          note() { printf -- '- %s\n' "$2" >> "${DRIFT_DIR}/$1.md"; }
+
+          # True when $2 sorts above $1. Version-aware on purpose: a plain "differs from the pin"
+          # also fires for a patch release cut from an older branch, and would point the re-pin
+          # backwards.
+          newer() {
+            [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$2" ]
+          }
+
+          # owner/repo out of the pinned clone urls, so the api calls follow the pins.
+          slug() { local url="${1#https://github.com/}"; printf '%s' "${url%.git}"; }
+
+          # The highest *version* among published releases, as "<tag><TAB><url>", empty when the
+          # repo publishes none. Not /releases/latest, which is the most recently published one
+          # and answers with an old version when a maintenance branch gets a late patch.
+          # Non-zero exit means the api call failed — reported, rather than read as "no releases".
+          highest_release() {
+            gh api "repos/$1/releases" --paginate \
+              --jq '.[] | select(.draft == false and .prerelease == false) | "\(.tag_name)\t\(.html_url)"' \
+              | sort -V | tail -1
+          }
+
+          android_repo="$(slug "${ANTMEDIA_ANDROID_REPOSITORY}")"
+          ios_repo="$(slug "${ANTMEDIA_IOS_REPOSITORY}")"
+
+          # Android tags: the pinned tag must still resolve to the pinned commit, and a newer tag
+          # is worth knowing about. One listing answers both — an annotated tag appears twice,
+          # refs/tags/x and the peeled refs/tags/x^{}, and the peeled line is the real commit.
+          if ! android_tags="$(git ls-remote --tags "${ANTMEDIA_ANDROID_REPOSITORY}")"; then
+            note android "Could not reach \`${ANTMEDIA_ANDROID_REPOSITORY}\` to check its tags."
+          else
+            effective="$(printf '%s\n' "${android_tags}" \
+              | awk -v tag="refs/tags/${ANTMEDIA_ANDROID_TAG}" '
+                  $2 == tag "^{}" { peeled = $1 }
+                  $2 == tag       { plain = $1 }
+                  END             { print (peeled != "" ? peeled : plain) }')"
+
+            if [ -z "${effective}" ]; then
+              note android "Tag \`${ANTMEDIA_ANDROID_TAG}\` no longer exists upstream."
+            elif [ "${effective}" != "${ANTMEDIA_ANDROID_COMMIT}" ]; then
+              note android "**Tag \`${ANTMEDIA_ANDROID_TAG}\` was re-pointed**: now \`${effective}\`, pinned \`${ANTMEDIA_ANDROID_COMMIT}\`. Treat as suspicious until explained."
+            fi
+
+            latest_tag="$(printf '%s\n' "${android_tags}" \
+              | awk -F/ '$NF ~ /^v/ && $NF !~ /\^\{\}$/ { print $NF }' | sort -V | tail -1)"
+            if [ -n "${latest_tag}" ] && newer "${ANTMEDIA_ANDROID_TAG}" "${latest_tag}"; then
+              note android "SDK has a newer tag: \`${latest_tag}\` (pinned \`${ANTMEDIA_ANDROID_TAG}\`)."
+            fi
+          fi
+
+          # Android releases are their own signal, not a duplicate of the tags: upstream tags far
+          # more often than it publishes, so a release above the pin means a build they stand
+          # behind, with notes saying what changed. The pinned tag has no release of its own.
+          if ! android_release="$(highest_release "${android_repo}")"; then
+            note android "Could not list releases for \`${android_repo}\`."
+          elif [ -n "${android_release}" ] && newer "${ANTMEDIA_ANDROID_TAG}" "${android_release%%$'\t'*}"; then
+            note android "SDK published release [\`${android_release%%$'\t'*}\`](${android_release##*$'\t'}) (pinned \`${ANTMEDIA_ANDROID_TAG}\`)."
+          fi
+
+          # iOS: no versions upstream, so master moving past the pinned commit is the only routine
+          # signal.
+          #
+          # The exact-ref match is not decoration: `ls-remote <url> HEAD` matches the *tail* of a
+          # ref name, and this repository has a stray refs/remotes/origin/HEAD pushed into it, so
+          # a plain `cut -f1` returns two shas glued together and every run reports drift.
+          if ! ios_head="$(git ls-remote "${ANTMEDIA_IOS_REPOSITORY}" HEAD | awk '$2 == "HEAD" { print $1 }')"; then
+            note ios "Could not reach \`${ANTMEDIA_IOS_REPOSITORY}\` to check its HEAD."
+          elif [ -z "${ios_head}" ]; then
+            note ios "\`${ANTMEDIA_IOS_REPOSITORY}\` reported no HEAD — the default branch may have been renamed."
+          elif [ "${ios_head}" != "${ANTMEDIA_IOS_COMMIT}" ]; then
+            note ios "SDK master moved: \`${ios_head}\` (pinned \`${ANTMEDIA_IOS_COMMIT}\`)."
+          fi
+
+          # A release appearing there at all is news rather than drift: it would give the iOS pin
+          # a version to track instead of a bare commit, and take the guesswork out of re-pinning.
+          if ! ios_release="$(highest_release "${ios_repo}")"; then
+            note ios "Could not list releases for \`${ios_repo}\`."
+          elif [ -n "${ios_release}" ]; then
+            note ios "The SDK now publishes releases ([\`${ios_release%%$'\t'*}\`](${ios_release##*$'\t'})) — the pin can move from a bare commit to a version."
+          fi
+
+          # Mac Catalyst links stasel/WebRTC's prebuilt xcframework. A newer release is routine;
+          # the pinned asset's bytes changing under an unchanged version is not.
+          if ! mac_release="$(highest_release stasel/WebRTC)"; then
+            note mac "Could not list releases for \`stasel/WebRTC\`."
+          elif [ -n "${mac_release}" ] && newer "${ANTMEDIA_MAC_WEBRTC_RELEASE}" "${mac_release%%$'\t'*}"; then
+            note mac "stasel/WebRTC has a newer release: [\`${mac_release%%$'\t'*}\`](${mac_release##*$'\t'}) (pinned \`${ANTMEDIA_MAC_WEBRTC_RELEASE}\`)."
+          fi
+
+          actual_sha="$(curl -sfL --retry 3 "${ANTMEDIA_MAC_WEBRTC_URL}" | sha256sum | cut -d' ' -f1 || true)"
+          if [ -z "${actual_sha}" ]; then
+            note mac "Could not download \`${ANTMEDIA_MAC_WEBRTC_URL}\` to re-verify its hash."
+          elif [ "${actual_sha}" != "${ANTMEDIA_MAC_WEBRTC_SHA256}" ]; then
+            note mac "**The pinned libwebrtc asset's bytes changed**: sha256 now \`${actual_sha}\`, pinned \`${ANTMEDIA_MAC_WEBRTC_SHA256}\`. The version did not change, so treat as suspicious."
+          fi
+
+      - name: Report per platform
+        env:
+          DRIFT_DIR: ${{ runner.temp }}/drift
+        run: |
+          set -euo pipefail
+
+          today="$(date -u +%Y-%m-%d)"
+          resolved='<!-- upstream-drift: resolved -->'
+
+          # The search is a phrase query, so it returns every platform's issue; the exact title
+          # picks the one that belongs to this platform. Newest first, and the caller takes the
+          # first line — there should only ever be one open per platform.
+          find_issue() {
+            gh issue list --state "$1" --limit 50 \
+              --search 'in:title "Upstream drift" sort:created-desc' \
+              --json number,title --jq '.[] | "\(.number)\t\(.title)"' \
+              | awk -F'\t' -v title="$2" '$2 == title { print $1 }'
+          }
+
+          echo '## Upstream drift' >> "$GITHUB_STEP_SUMMARY"
+
+          # Every platform is visited, drift or not: a platform whose drift is gone closes its
+          # issue, which is what keeps a daily run from leaving stale ones behind.
+          for entry in 'android:Android' 'ios:iOS' 'mac:Mac Catalyst'; do
+            key="${entry%%:*}"
+            platform="${entry#*:}"
+            title="Upstream drift: ${platform}"
+            file="${DRIFT_DIR}/${key}.md"
+
+            matches="$(find_issue open "${title}")"
+            open_issue="${matches%%$'\n'*}"
+
+            if [ ! -s "${file}" ]; then
+              if [ -n "${open_issue}" ]; then
+                gh issue comment "${open_issue}" \
+                  --body "$(printf '%s pins match upstream again as of %s — closing.\n\n%s\n' "${platform}" "${today}" "${resolved}")"
+                gh issue close "${open_issue}"
+                printf -- '- %s: drift cleared, closed #%s\n' "${platform}" "${open_issue}" >> "$GITHUB_STEP_SUMMARY"
+              else
+                printf -- '- %s: pins match upstream\n' "${platform}" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
+            # A daily job that re-posted the same drift every morning would be muted within a
+            # week. The fingerprint is what makes a repeat cheap to recognise: same drift, no post.
+            fingerprint="${key} $(sha256sum "${file}" | cut -c1-12)"
+            body="$(printf '**Platform: %s** — the daily upstream check saw this on %s:\n\n%s\n\nPins live in `Directory.Build.props`; `docs/BUILD.md` covers re-pinning.\n\n<!-- upstream-drift: %s -->\n' \
+              "${platform}" "${today}" "$(cat "${file}")" "${fingerprint}")"
+
+            if [ -n "${open_issue}" ]; then
+              seen="$(gh issue view "${open_issue}" --json body,comments --jq '.body, .comments[].body')"
+              if [[ "${seen}" == *"${fingerprint}"* ]]; then
+                printf -- '- %s: unchanged, already on #%s\n' "${platform}" "${open_issue}" >> "$GITHUB_STEP_SUMMARY"
+              else
+                gh issue comment "${open_issue}" --body "${body}"
+                printf -- '- %s: drift changed, commented on #%s\n' "${platform}" "${open_issue}" >> "$GITHUB_STEP_SUMMARY"
+              fi
+              continue
+            fi
+
+            # Nothing open. If this exact drift was reported before and a *person* closed it —
+            # as opposed to this job closing it because upstream moved back — that was a decision
+            # to skip the update, and re-filing it tomorrow would be nagging.
+            matches="$(find_issue closed "${title}")"
+            closed_issue="${matches%%$'\n'*}"
+            if [ -n "${closed_issue}" ]; then
+              seen="$(gh issue view "${closed_issue}" --json body,comments --jq '.body, .comments[].body')"
+              if [[ "${seen}" == *"${fingerprint}"* && "${seen}" != *"${resolved}"* ]]; then
+                printf -- '- %s: same drift dismissed on #%s, not re-filing\n' "${platform}" "${closed_issue}" >> "$GITHUB_STEP_SUMMARY"
+                continue
+              fi
+            fi
+
+            url="$(gh issue create --title "${title}" --body "${body}")"
+            printf -- '- %s: opened %s\n' "${platform}" "${url}" >> "$GITHUB_STEP_SUMMARY"
+          done

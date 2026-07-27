@@ -104,6 +104,22 @@
     -->
     <AntMediaMacCatalystTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0-maccatalyst18.0;net9.0-maccatalyst18.0</AntMediaMacCatalystTargetFrameworks>
     <AntMediaMacCatalystTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0-maccatalyst26.0</AntMediaMacCatalystTargetFrameworks>
+
+    <!--
+      Plain target frameworks, carrying an implementation that streams nowhere. Ant Media publishes
+      no Windows or desktop SDK, so there is nothing to bind - but without an asset a Windows TFM
+      can resolve, `dotnet new maui` plus this package is an outright restore failure:
+
+        error NU1202: Package AntMedia.Net.Maui is not compatible with net10.0-windows10.0.19041.0
+
+      and it fails the *whole* project, not just the Windows leg. The template adds that target
+      whenever the developer is on Windows, so this hit everyone building a MAUI Android app from a
+      Windows machine - who needs no Mac and no Apple SDK at all. A windows TFM falls back to the
+      plain one, so these assets end that: the app restores, builds, and only throws if it actually
+      tries to stream. They cover a net9.0 unit-test project referencing the client too.
+    -->
+    <AntMediaFallbackTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net9' ">net8.0;net9.0</AntMediaFallbackTargetFrameworks>
+    <AntMediaFallbackTargetFrameworks Condition=" '$(AntMediaSdkBand)' == 'net10' ">net10.0</AntMediaFallbackTargetFrameworks>
   </PropertyGroup>
 
   <!--

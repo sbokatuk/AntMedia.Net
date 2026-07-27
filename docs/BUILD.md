@@ -48,6 +48,7 @@ the current target framework and the previous one only. Verified on this reposit
 | --- | --- | --- |
 | Android | `net8.0-android34.0`, `net9.0-android35.0` | `net10.0-android36.0` |
 | iOS | `net8.0-ios18.0`, `net9.0-ios18.0` | `net10.0-ios26.0` |
+| plain | `net8.0`, `net9.0` | `net10.0` |
 
 So `BuildNugets.sh` packs each project twice — once under the SDK `global.json` pins, once from a
 scratch directory whose own `global.json` selects the .NET 10 SDK — and `merge-packages.py`
@@ -57,6 +58,21 @@ nuspec dependency groups.
 The platform version in each target framework is pinned deliberately. Bare `net8.0-android`
 resolves to `android21.0`, which produces a binding assembly with no `.aar` payload — it compiles,
 packs and installs, and fails only at runtime.
+
+### The plain frameworks
+
+The two cross-platform packages also carry a plain `net8.0`/`net9.0`/`net10.0` assembly —
+`AntMediaFallbackTargetFrameworks`, compiled from `Platforms/Unsupported` with no binding
+dependency. It streams nothing: every session call throws `PlatformNotSupportedException`, and
+`AntMediaVideoView` is an empty `ContentView` with no handler.
+
+It exists because a NuGet package that resolves *nothing* for a target framework fails restore for
+the entire project, not just that leg — and `dotnet new maui` on a Windows machine adds
+`net*-windows` to `TargetFrameworks` by default. Without this asset, a developer on Windows
+building the Android leg (which needs no Mac and no Apple SDK) hit `NU1202` and had to edit their
+`TargetFrameworks` before anything would restore. The bindings themselves get no plain framework:
+they are the native payload, so there is nothing to put in one, and the plain dependency groups
+pull none of them in.
 
 ## Native SDKs
 
@@ -384,7 +400,7 @@ On Apple Silicon the community image runs under emulation, which is slower to st
 | [`build.yml`](../.github/workflows/build.yml) | called by the other two | Builds natives, packs, validates, runs all three smoke tests |
 | [`pr.yml`](../.github/workflows/pr.yml) | pull requests | Builds `<version>-beta.<pr>.<run>`; publishes it only when the PR carries the `publish-beta` label — nuget.org versions are permanent, so betas are opt-in |
 | [`release.yml`](../.github/workflows/release.yml) | `v*` tags | Publishes the tagged version with a build-provenance attestation and creates the GitHub release |
-| [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | weekly | Compares the pins to upstream, re-verifies the pinned libwebrtc asset's bytes, opens an issue on drift |
+| [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | daily | Compares the pins to upstream, re-verifies the pinned libwebrtc asset's bytes, opens an issue per platform on drift |
 
 `build.yml` splits packing across runners: Android needs only a JDK and the Android SDK so it
 packs on `ubuntu-latest`, while the Apple packages need Xcode and pack on `macos-15` — pinned, not
@@ -422,9 +438,18 @@ always anchored by an immutable identity. Update the parts together:
   download the new `WebRTC-M<major>.xcframework.zip` release asset, `shasum -a 256` it, and pin
   both.
 
-The weekly [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) run opens an issue
+The daily [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) run opens an issue
 when any of these moves upstream — including when the pinned libwebrtc asset's *bytes* change
-under an unchanged version, which is a tamper signal rather than an update.
+under an unchanged version, which is a tamper signal rather than an update. Android is watched on
+two axes, since upstream tags far more often than it publishes: a newer tag, and a newer GitHub
+release, which is the one they stand behind and write notes for.
+
+Each platform gets its own issue, titled `Upstream drift: <platform>`, so the title says where the
+change is and an Android re-pin is not tangled up with a Mac one. Nothing is ever filed twice: the
+body carries a fingerprint of the drift it reports, so a repeat run posts nothing, drift that grows
+adds a comment to the open issue, and drift that goes away closes it. Closing an issue by hand is
+read as declining that update — the same drift is not re-filed the next morning, though a *further*
+change upstream opens a fresh issue.
 
 The version the packages ship as is a different axis: `VersionPrefix` tracks the Ant Media
 *SDK* version and stays put between SDK bumps, while each release of this repository appends its

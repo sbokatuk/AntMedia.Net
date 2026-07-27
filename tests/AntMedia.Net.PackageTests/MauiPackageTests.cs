@@ -78,4 +78,45 @@ public class MauiPackageTests
             !api.ReferencedTypes.Contains(wrong),
             $"{Packages.Maui} ({tfm}) references {wrong}, which belongs to the other platform.");
     }
+
+    /// <summary>
+    /// On a plain target framework there is no native renderer, so the view falls back to being a
+    /// <c>ContentView</c> and no handler is compiled at all. That combination is what keeps a
+    /// Windows page from throwing "Handler not found" the moment it appears — and it is invisible
+    /// to the compiler, since a stray handler bound to nothing would build perfectly well.
+    /// </summary>
+    [SkippableTheory]
+    [MemberData(nameof(Packages.FallbackFrameworks), MemberType = typeof(Packages))]
+    public void Maui_package_falls_back_to_a_plain_view_where_no_sdk_exists(string tfm)
+    {
+        Skip.IfNot(Packages.Exists(Packages.Maui), "the MAUI package is only built on macOS");
+
+        using var package = Packages.OpenPackage(Packages.Maui);
+        using var assembly = Packages.ReadEntry(package, $"lib/{tfm}/AntMedia.Net.Maui.dll");
+        using var api = new AssemblyApi(assembly);
+
+        // The view and the extension methods still have to be there: an app's shared code names
+        // all three, and this asset is what makes that code compile for Windows.
+        Assert.Contains("AntMedia.Net.Maui.AntMediaVideoView", api.PublicTypes);
+        Assert.Contains("AntMedia.Net.Maui.AppBuilderExtensions", api.PublicTypes);
+        Assert.Contains("AntMedia.Net.Maui.AntMediaClientExtensions", api.PublicTypes);
+
+        Assert.True(
+            !api.PublicTypes.Contains("AntMedia.Net.Maui.AntMediaVideoViewHandler"),
+            $"{Packages.Maui} ({tfm}) defines the handler, which has no native view to drive " +
+            "here. Check the #if conditions in AntMediaVideoView.cs.");
+
+        Assert.True(
+            api.ReferencedTypes.Contains("ContentView"),
+            $"{Packages.Maui} ({tfm}) does not derive the view from ContentView, so MAUI has no " +
+            "built-in handler for it and a page containing one throws when it appears.");
+
+        foreach (var native in new[] { "SurfaceViewRenderer", "UIView" })
+        {
+            Assert.True(
+                !api.ReferencedTypes.Contains(native),
+                $"{Packages.Maui} ({tfm}) references {native}: a platform half was compiled into " +
+                "the asset that is supposed to have no platform.");
+        }
+    }
 }

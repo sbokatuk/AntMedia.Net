@@ -10,7 +10,7 @@
     be a poor trade.
   -->
   <PropertyGroup>
-    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks);$(AntMediaMacCatalystTargetFrameworks)</TargetFrameworks>
+    <TargetFrameworks>$(AntMediaAndroidTargetFrameworks);$(AntMediaIosTargetFrameworks);$(AntMediaMacCatalystTargetFrameworks);$(AntMediaFallbackTargetFrameworks)</TargetFrameworks>
 
     <AssemblyName>AntMedia.Net.Maui</AssemblyName>
     <RootNamespace>AntMedia.Net.Maui</RootNamespace>

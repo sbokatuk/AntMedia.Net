@@ -38,8 +38,23 @@ public static class Packages
         "net8.0-maccatalyst18.0", "net9.0-maccatalyst18.0", "net10.0-maccatalyst26.0",
     ];
 
+    /// <summary>
+    /// The plain target frameworks the cross-platform packages carry, one per SDK band. They hold
+    /// an implementation that streams nowhere, and they exist so that a target framework with no
+    /// Ant Media SDK behind it — Windows, above all — still resolves an asset: without one,
+    /// restore fails for the whole project with NU1202, taking the Android leg down with it. They
+    /// are pinned here because dropping one would break nothing that any other test can see.
+    /// </summary>
+    public static readonly string[] FallbackTargetFrameworks =
+    [
+        "net8.0", "net9.0", "net10.0",
+    ];
+
     public static IEnumerable<object[]> AndroidFrameworks =>
         AndroidTargetFrameworks.Select(tfm => new object[] { tfm });
+
+    public static IEnumerable<object[]> FallbackFrameworks =>
+        FallbackTargetFrameworks.Select(tfm => new object[] { tfm });
 
     public static IEnumerable<object[]> IosFrameworks =>
         IosTargetFrameworks.Select(tfm => new object[] { tfm });

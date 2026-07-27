@@ -15,6 +15,11 @@ public static class AppBuilderExtensions
     /// native counterpart and renders nothing — MAUI does not discover third-party handlers on
     /// its own.
     /// </summary>
+    /// <remarks>
+    /// Safe to call unconditionally from shared code. On a platform with no Ant Media SDK it
+    /// registers nothing, because there is no handler to register — the view is an ordinary
+    /// <c>ContentView</c> there and MAUI's own handler renders it.
+    /// </remarks>
     /// <example>
     /// <code>
     /// builder.UseMauiApp&lt;App&gt;().UseAntMedia();
@@ -24,8 +29,10 @@ public static class AppBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+#if ANDROID || IOS || MACCATALYST
         builder.ConfigureMauiHandlers(handlers =>
             handlers.AddHandler<AntMediaVideoView, AntMediaVideoViewHandler>());
+#endif
 
         return builder;
     }
