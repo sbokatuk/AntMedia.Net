@@ -384,7 +384,7 @@ On Apple Silicon the community image runs under emulation, which is slower to st
 | [`build.yml`](../.github/workflows/build.yml) | called by the other two | Builds natives, packs, validates, runs all three smoke tests |
 | [`pr.yml`](../.github/workflows/pr.yml) | pull requests | Builds `<version>-beta.<pr>.<run>`; publishes it only when the PR carries the `publish-beta` label — nuget.org versions are permanent, so betas are opt-in |
 | [`release.yml`](../.github/workflows/release.yml) | `v*` tags | Publishes the tagged version with a build-provenance attestation and creates the GitHub release |
-| [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | weekly | Compares the pins to upstream, re-verifies the pinned libwebrtc asset's bytes, opens an issue on drift |
+| [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) | daily | Compares the pins to upstream, re-verifies the pinned libwebrtc asset's bytes, opens an issue per platform on drift |
 
 `build.yml` splits packing across runners: Android needs only a JDK and the Android SDK so it
 packs on `ubuntu-latest`, while the Apple packages need Xcode and pack on `macos-15` — pinned, not
@@ -422,9 +422,18 @@ always anchored by an immutable identity. Update the parts together:
   download the new `WebRTC-M<major>.xcframework.zip` release asset, `shasum -a 256` it, and pin
   both.
 
-The weekly [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) run opens an issue
+The daily [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) run opens an issue
 when any of these moves upstream — including when the pinned libwebrtc asset's *bytes* change
-under an unchanged version, which is a tamper signal rather than an update.
+under an unchanged version, which is a tamper signal rather than an update. Android is watched on
+two axes, since upstream tags far more often than it publishes: a newer tag, and a newer GitHub
+release, which is the one they stand behind and write notes for.
+
+Each platform gets its own issue, titled `Upstream drift: <platform>`, so the title says where the
+change is and an Android re-pin is not tangled up with a Mac one. Nothing is ever filed twice: the
+body carries a fingerprint of the drift it reports, so a repeat run posts nothing, drift that grows
+adds a comment to the open issue, and drift that goes away closes it. Closing an issue by hand is
+read as declining that update — the same drift is not re-filed the next morning, though a *further*
+change upstream opens a fresh issue.
 
 The version the packages ship as is a different axis: `VersionPrefix` tracks the Ant Media
 *SDK* version and stays put between SDK bumps, while each release of this repository appends its
