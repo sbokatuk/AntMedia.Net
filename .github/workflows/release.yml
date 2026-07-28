@@ -119,7 +119,11 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          name: nuget-packages
+          # The two pack artifacts merged, not the combined nuget-packages one: that is uploaded
+          # by build.yml's validate job, which a release skips (verify: false), so naming it here
+          # would fail every release with "Artifact not found for name: nuget-packages".
+          pattern: nuget-packages-*
+          merge-multiple: true
           path: artifacts
 
       # Signed provenance for exactly the bytes about to be pushed: consumers can verify with
