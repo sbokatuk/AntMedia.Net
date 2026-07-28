@@ -345,7 +345,11 @@ jobs:
   link-release:
     name: Release link check (Android)
     if: ${{ inputs.verify }}
-    needs: pack-android
+    # Both pack jobs, even though only the Android leg is linked. The sample references the
+    # AntMedia.Net.Maui metapackage, and that - like AntMedia.Net under it - packs on the macOS
+    # runner, because its pinned dependencies on the Apple bindings have to resolve at restore
+    # time. Without pack-apple the sample has nothing to restore.
+    needs: [pack-android, pack-apple]
     timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
@@ -380,7 +384,12 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v4
         with:
-          name: nuget-packages
+          # The two pack artifacts merged, exactly as validate assembles them, rather than the
+          # combined nuget-packages artifact: that one is uploaded *by* validate, so naming it
+          # here would both fail before validate has run and put this check needlessly behind the
+          # package tests.
+          pattern: nuget-packages-*
+          merge-multiple: true
           path: artifacts
 
       - name: Link the sample in Release
