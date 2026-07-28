@@ -395,8 +395,14 @@ jobs:
       - name: Link the sample in Release
         run: |
           tfm=net9.0-android35.0
+
+          # TargetFrameworks as well as -f. Restore is a cross-targeting operation: it walks every
+          # entry in TargetFrameworks whatever -f says, so on ubuntu - which has the Android
+          # workload and no Apple one - the sample's iOS and Mac Catalyst legs fail the restore
+          # outright (NETSDK1178) before the Android build starts. Narrowing the property to the
+          # one framework under test is what keeps this an Android-only check.
           dotnet build samples/AntMedia.Net.Sample \
-            -c Release -f "${tfm}" \
+            -c Release -f "${tfm}" -p:TargetFrameworks="${tfm}" \
             -p:AntMediaPackageVersion="${{ inputs.version }}"
 
           # Asserted rather than assumed: a Release build that trimmed the binding away, or that
