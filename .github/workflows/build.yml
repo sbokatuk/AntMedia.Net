@@ -10,6 +10,16 @@ name: build
 on:
   workflow_call:
     inputs:
+      verify:
+        description: >
+          Whether to run the verification jobs — package validation, the sample builds, the
+          Release link checks and the e2e suites. Pull requests leave it at true, and are the only
+          place any of this runs. Releases pass false: the tagged commit was already verified on
+          its pull request, so a tag packs and publishes and nothing more. The gate is the same
+          input, with the same name and the same meaning, in every repository.
+        required: false
+        default: true
+        type: boolean
       version:
         description: NuGet version to stamp on every package.
         required: true
@@ -285,6 +295,7 @@ jobs:
           retention-days: 7
 
       - name: Build the sample against the packed packages
+        if: ${{ inputs.verify }}
         run: |
           # Proves the metapackage is actually consumable: it restores, resolves to the right
           # platform binding per target framework, and the iOS half links — which is where a
@@ -320,8 +331,77 @@ jobs:
             -p:AntMediaPackageVersion="${{ inputs.version }}"
           echo "::endgroup::"
 
+  # Everything else here compiles the sample in Debug, which restores, resolves and links but
+  # never runs the linker or the AOT compiler — and those are what a consumer actually ships.
+  # A Release build has broken binding consumers that were green in Debug.
+  #
+  # Android only, deliberately. The pack-apple sample step above records the measurement: an iOS
+  # Release build trims and AOT-compiles against the ~27 MB WebRTC framework and took 38 minutes
+  # of macOS runner time for no added signal, which is the opposite of what this alignment is
+  # for. Android Release turns on managed trimming and R8 for a few ubuntu minutes, so it buys
+  # most of the signal for a rounding error of the cost. If the iOS link is ever worth those 38
+  # minutes, it belongs in its own job behind the same label e2e-android-live uses, not on every
+  # pull request.
+  link-release:
+    name: Release link check (Android)
+    if: ${{ inputs.verify }}
+    needs: pack-android
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            9.0.x
+            10.0.x
+
+      - name: Install Android and MAUI workloads
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sdk10"
+          ( cd "${RUNNER_TEMP}/sdk10" \
+            && dotnet new globaljson --sdk-version "$(dotnet --list-sdks | grep '^10\.' | tail -1 | cut -d' ' -f1)" --force \
+            && dotnet workload install android maui-android )
+          dotnet workload install android maui-android
+
+      - name: Set up Android SDK platforms
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 platforms;android-36'
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts
+
+      - name: Link the sample in Release
+        run: |
+          tfm=net9.0-android35.0
+          dotnet build samples/AntMedia.Net.Sample \
+            -c Release -f "${tfm}" \
+            -p:AntMediaPackageVersion="${{ inputs.version }}"
+
+          # Asserted rather than assumed: a Release build that trimmed the binding away, or that
+          # never got as far as packaging, would still leave a bin/ directory behind.
+          apk="$(find "samples/AntMedia.Net.Sample/bin/Release/${tfm}" -name '*.apk' | head -1)"
+          if [ -z "${apk}" ]; then
+            echo "::error::no APK under samples/AntMedia.Net.Sample/bin/Release/${tfm} — the Release build did not package"
+            exit 1
+          fi
+          echo "==> ${apk} ($(du -h "${apk}" | cut -f1))"
+
   validate:
     name: validate packages
+    if: ${{ inputs.verify }}
     needs: [pack-android, pack-apple]
     runs-on: ubuntu-latest
     steps:
@@ -365,6 +445,7 @@ jobs:
 
   e2e-android:
     name: Android emulator smoke test
+    if: ${{ inputs.verify }}
     needs: [pack-android, validate]
     runs-on: ubuntu-latest
     steps:
@@ -441,6 +522,7 @@ jobs:
 
   e2e-android-live:
     name: live publish against an Ant Media Server
+    if: ${{ inputs.verify }}
     needs: [pack-android, validate]
     runs-on: ubuntu-latest
     # Informational rather than blocking. Everything it depends on is outside this repository - a
@@ -545,6 +627,7 @@ jobs:
 
   e2e-ios:
     name: iOS simulator smoke test
+    if: ${{ inputs.verify }}
     needs: [pack-apple, validate]
     runs-on: macos-15
     steps:
@@ -595,6 +678,7 @@ jobs:
 
   e2e-mac:
     name: Mac Catalyst smoke test
+    if: ${{ inputs.verify }}
     needs: [pack-apple, validate]
     # arm64. AntMedia.Net.Mac ships an arm64 Catalyst slice only, because Ant Media renders
     # through OpenGL when arch != arm64 and Mac Catalyst has no OpenGL.
