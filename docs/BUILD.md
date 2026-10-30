@@ -438,6 +438,32 @@ always anchored by an immutable identity. Update the parts together:
   download the new `WebRTC-M<major>.xcframework.zip` release asset, `shasum -a 256` it, and pin
   both.
 
+A pinned [stasel/WebRTC][stasel] release can disappear, and the sha256 pin cannot help with that:
+it stops wrong bytes, not missing ones. Upstream does not treat its tags as immutable. On
+2026-08-31 the 151.0.0 asset changed to the bytes now published as 151.0.1, and by the next day the
+151.0.0 release was gone. Packages already on nuget.org are unaffected, since they carry the
+framework; what breaks is building this repository. It shows up in two places:
+
+- `fetch-mac.sh` stops at `==> stock libwebrtc <release>` with
+  `curl: (56) The requested URL returned error: 404`, so `pack Apple` fails on every pull request
+  whatever it changes. A CI cache hit on the Mac xcframeworks skips the download, so this can
+  arrive some time after the release went.
+- The `Upstream drift: Mac Catalyst` issue reports that the asset's bytes changed, with sha256
+  `e3b0c44298fc…b855`. That is the hash of an empty download: the asset is missing, not tampered
+  with. A real hash under an unchanged version is the suspicious case.
+
+Do not look for a copy of the old asset, and do not settle for the nearest surviving release.
+Re-pin to the newest release, as for any update, and take the digest from GitHub as the second
+opinion on your own `shasum -a 256`:
+
+```sh
+gh api repos/stasel/WebRTC/releases/latest --jq '.tag_name, (.assets[] | .name, .digest)'
+```
+
+Then run `./native/mac/fetch-mac.sh -f`. It proves the shim still compiles and links, but not that
+media flows, so finish with the Mac Catalyst device tests and a live publish against an Ant Media
+Server.
+
 The daily [`upstream-drift.yml`](../.github/workflows/upstream-drift.yml) run opens an issue
 when any of these moves upstream — including when the pinned libwebrtc asset's *bytes* change
 under an unchanged version, which is a tamper signal rather than an update. Android is watched on
