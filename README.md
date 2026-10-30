@@ -178,7 +178,8 @@ Guard the calls, not the reference:
 Capture permissions are the app's own responsibility either way: `CAMERA` and `RECORD_AUDIO` in
 `AndroidManifest.xml`, `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` in
 `Info.plist`, plus `com.apple.security.device.camera` and `.audio-input` entitlements for a
-sandboxed Mac Catalyst app.
+sandboxed Mac Catalyst app. That app also needs `com.apple.security.network.client` and
+`.server`: without the second one the server confirms the publish, but no media ever arrives.
 
 ## Packages
 

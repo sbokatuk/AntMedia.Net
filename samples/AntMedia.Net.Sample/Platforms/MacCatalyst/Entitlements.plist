@@ -8,6 +8,12 @@
 	<key>com.apple.security.network.client</key>
 	<true/>
 
+	<!-- WebRTC carries its media over UDP sockets it binds itself. Without this entitlement the
+	     failure is silent: signalling works and the server confirms the publish, but ICE never
+	     connects and no media arrives. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
+
 	<!-- Publishing captures from the camera and microphone. Unlike iOS, a sandboxed Catalyst app
 	     needs these entitlements as well as the Info.plist usage descriptions: without them the
 	     capture device simply never delivers frames, with no permission prompt and no error. -->
