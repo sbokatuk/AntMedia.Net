@@ -46,9 +46,13 @@
     <!--
       Ad-hoc signed. The live check opens the camera, and macOS refuses that to an unsigned bundle;
       '-' is the local signature a development build gets, which is enough outside distribution.
+
+      The sample's entitlements, not a copy: the live check runs in the same sandbox a consumer's
+      app does, so an entitlement WebRTC needs and the sample lacks fails here. Outside the sandbox
+      it could not, which is how a sample that never connected ICE once passed.
     -->
     <CodesignKey>-</CodesignKey>
-    <CodesignEntitlements>Entitlements.plist</CodesignEntitlements>
+    <CodesignEntitlements>../../samples/AntMedia.Net.Sample/Platforms/MacCatalyst/Entitlements.plist</CodesignEntitlements>
   </PropertyGroup>
 
   <ItemGroup>
