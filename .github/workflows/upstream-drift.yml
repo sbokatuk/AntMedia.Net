@@ -130,9 +130,11 @@ jobs:
             note mac "stasel/WebRTC has a newer release: [\`${mac_release%%$'\t'*}\`](${mac_release##*$'\t'}) (pinned \`${ANTMEDIA_MAC_WEBRTC_RELEASE}\`)."
           fi
 
-          actual_sha="$(curl -sfL --retry 3 "${ANTMEDIA_MAC_WEBRTC_URL}" | sha256sum | cut -d' ' -f1 || true)"
-          if [ -z "${actual_sha}" ]; then
-            note mac "Could not download \`${ANTMEDIA_MAC_WEBRTC_URL}\` to re-verify its hash."
+          # Decided by the pipeline's exit status, not its output: given nothing to read, sha256sum
+          # still prints the hash of an empty stream, so a deleted release would read as changed
+          # bytes below. The step's pipefail is what carries curl's failure out of the pipeline.
+          if ! actual_sha="$(curl -sfL --retry 3 "${ANTMEDIA_MAC_WEBRTC_URL}" | sha256sum | cut -d' ' -f1)"; then
+            note mac "Could not download \`${ANTMEDIA_MAC_WEBRTC_URL}\` to re-verify its hash. The release may have been deleted upstream: see Re-pinning upstream in \`docs/BUILD.md\`. A passing network failure clears on the next run."
           elif [ "${actual_sha}" != "${ANTMEDIA_MAC_WEBRTC_SHA256}" ]; then
             note mac "**The pinned libwebrtc asset's bytes changed**: sha256 now \`${actual_sha}\`, pinned \`${ANTMEDIA_MAC_WEBRTC_SHA256}\`. The version did not change, so treat as suspicious."
           fi

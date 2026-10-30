@@ -461,9 +461,9 @@ framework; what breaks is building this repository. It shows up in two places:
   `curl: (56) The requested URL returned error: 404`, so `pack Apple` fails on every pull request
   whatever it changes. A CI cache hit on the Mac xcframeworks skips the download, so this can
   arrive some time after the release went.
-- The `Upstream drift: Mac Catalyst` issue reports that the asset's bytes changed, with sha256
-  `e3b0c44298fc…b855`. That is the hash of an empty download: the asset is missing, not tampered
-  with. A real hash under an unchanged version is the suspicious case.
+- The `Upstream drift: Mac Catalyst` issue reports that the asset could not be downloaded. A
+  passing network failure clears on the next run; if the report stays, the asset is missing, not
+  tampered with. A changed sha256 under an unchanged version is the suspicious case.
 
 Do not look for a copy of the old asset, and do not settle for the nearest surviving release.
 Re-pin to the newest release, as for any update, and take the digest from GitHub as the second
