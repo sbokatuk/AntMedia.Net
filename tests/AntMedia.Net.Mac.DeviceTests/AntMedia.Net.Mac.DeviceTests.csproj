@@ -55,6 +55,7 @@
     <Compile Include="../AntMedia.Net.iOS.DeviceTests/Main.cs" Link="Main.cs" />
     <Compile Include="../AntMedia.Net.iOS.DeviceTests/SmokeTests.cs" Link="SmokeTests.cs" />
     <Compile Include="../AntMedia.Net.iOS.DeviceTests/LiveStreamTest.cs" Link="LiveStreamTest.cs" />
+    <Compile Include="../Shared/ServerMediaCheck.cs" Link="ServerMediaCheck.cs" />
   </ItemGroup>
 
   <ItemGroup>
