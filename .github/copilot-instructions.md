@@ -77,8 +77,7 @@ docs/BUILD.md           the long-form version of all of the above
   and the sample restoring the published release instead of what was just packed.
 - British spelling throughout, matching the README ("licence", "behaviour", "customised"), and
   comments that explain *why*, in the style already in the props, the csproj files and the scripts.
-- Update `docs/BUILD.md` when behaviour changes; its paragraph claiming `buildTransitive/` "has not
-  been evaluated" is stale — the csproj comments and the packaging are the source of truth.
+- Update `docs/BUILD.md` when behaviour changes.
 
 ## CI and release flow
 
