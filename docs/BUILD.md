@@ -371,12 +371,28 @@ Three things differ from the Android run, and each one fails in a way that does 
   networking or codec fault.
 - **The server has to be reachable at an address it can advertise.** A default `docker run`
   publishes its ICE candidate as the container's own `172.17.0.2`, which is unroutable from macOS,
-  so signalling and ICE complete and no media ever flows. Publish the media ports
-  (`-p 50000-50020:50000-50020/udp`) and run the server somewhere its address is real to the
-  client — Docker Desktop's host networking, a VM, or a remote instance. Ant Media's
-  `settings.replaceCandidateAddrWithServerAddr` is the knob for this, but it lives in the server's
-  database, not `red5-web.properties`: editing the file is overwritten on the next start, so set it
-  from the web panel or the REST API.
+  so signalling completes and no media ever flows. Give the container the Mac's own LAN address on
+  a private bridge, so that is what it advertises, and publish the media ports. No admin account
+  or server setting is involved, and the same server works for the Android emulator:
+
+  ```bash
+  LAN=$(ipconfig getifaddr en0)
+  docker network create --subnet "${LAN%.*}.0/24" ams-lan
+  docker run -d --name ams --platform linux/amd64 --network ams-lan --ip "$LAN" \
+    -p 5080:5080 -p 50000-50020:50000-50020/udp antmedia/community:latest
+  ```
+
+  Ant Media's `settings.replaceCandidateAddrWithServerAddr` is not a shortcut here: `start.sh -r
+  true` sets it in `red5-web.properties` and the candidate still went out as `172.17.0.2`.
+- **A pass proves signalling, not media.** The check stops as soon as the server confirms the
+  publish, which happens before ICE connects, so it passes even when no media can flow, and the
+  `docker logs` lines above appear either way. To prove media, publish from the sample for a few
+  seconds: `curl -I http://localhost:5080/LiveApp/streams/<id>.m3u8` returns 200 once the server
+  has written segments.
+- **A sandboxed app also needs `com.apple.security.network.server`.** The smoke-test app has no
+  sandbox, the sample does. Without that entitlement the sample shows `publishing <id>` and ICE
+  never connects. The published 2.17.2.6 on libwebrtc 150 does the same, so this is not a
+  regression to chase in a re-pin.
 
 The iOS simulator has no camera or microphone, so the live check cannot run there at all; leave
 `ANTMEDIA_TEST_SERVER` unset and it reports `SKIP`.
@@ -385,7 +401,10 @@ Without `ANTMEDIA_TEST_SERVER` the app runs the offline checks only and logs
 `SKIP live publish (no serverUrl extra)`, leaving the check count unchanged — so a run with no
 server cannot be mistaken for one that proved streaming works.
 
-On Apple Silicon the community image runs under emulation, which is slower to start but works.
+On Apple Silicon the community image runs under emulation, which is slower to start but works,
+with one catch: the server crashes with a `SIGSEGV` when a publish stops immediately after it
+starts, which is exactly what the smoke-test check does. Start a fresh container for each run of
+the check. A publish from the sample that runs for a while leaves the server up.
 
 ## CI
 
