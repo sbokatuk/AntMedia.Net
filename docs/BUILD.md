@@ -302,6 +302,10 @@ docker run -d --name ams -p 5080:5080 antmedia/community:latest
 until curl -sf -o /dev/null http://localhost:5080/; do sleep 5; done
 ```
 
+On a Mac this server cannot receive media, because Docker runs in a VM and the container's ICE
+candidate is unroutable, so the check fails. Use the [private bridge](#the-same-on-mac-catalyst)
+instead.
+
 **2. Know which application you are talking to.** The community edition serves **`LiveApp`**;
 `WebRTCAppEE` is the Enterprise edition's application and returns 404 here. Getting this wrong
 looks like a publish timeout with nothing at all in the server log. Check what your server has:
@@ -392,6 +396,11 @@ Four things differ from the Android run, and each one fails in a way that does n
 
   Ant Media's `settings.replaceCandidateAddrWithServerAddr` is not a shortcut here: `start.sh -r
   true` sets it in `red5-web.properties` and the candidate still went out as `172.17.0.2`.
+
+  From the emulator this path is unreliable. ICE failed on 4 of 8 runs against the same server and
+  build, with the same server candidate as the runs that passed, for a reason not yet known. CI runs
+  the emulator on Linux, without Docker Desktop in the path. If logcat shows
+  `IceConnectionState: FAILED` here, run it again before suspecting the code.
 - **A sandboxed app also needs `com.apple.security.network.server`.** The smoke-test app signs with
   the sample's `Entitlements.plist`, so it runs in the same sandbox. Without that entitlement
   signalling still works and ICE never connects, so the check fails with `no media reached it`. The
