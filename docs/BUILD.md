@@ -138,12 +138,6 @@ Two details are load-bearing and easy to undo by accident:
   through `AntMedia.Net.Maui` → `AntMedia.Net` would never import the targets and would fail with
   exactly the error above. See the comment in
   [`AntMedia.Net.iOS.csproj`](../src/AntMedia.Net.iOS/AntMedia.Net.iOS.csproj).
-  A package-level `build/<id>.targets` that re-declared them in the consuming project would be
-  four times smaller, since it needs one copy rather than one per target framework. It does not
-  work: NuGet's default `PrivateAssets` hides `build` assets from *transitive* consumers, so an
-  app that arrives here through `AntMedia.Net.Maui` → `AntMedia.Net` never imports it, and fails
-  with exactly the error above. (`buildTransitive/`, which exists to flow targets to transitive
-  consumers, has not been evaluated — it is the open avenue for shrinking the Apple packages.)
 
 Requires macOS with Xcode. Nothing else is installed: the one fiddly part, adding the facade to
 the upstream Xcode target, is done by [`add-facade.py`](../native/ios/add-facade.py) using `plutil`
