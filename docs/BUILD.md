@@ -302,6 +302,10 @@ docker run -d --name ams -p 5080:5080 antmedia/community:latest
 until curl -sf -o /dev/null http://localhost:5080/; do sleep 5; done
 ```
 
+On a Mac this server cannot receive media, because Docker runs in a VM and the container's ICE
+candidate is unroutable, so the check fails. Use the [private bridge](#the-same-on-mac-catalyst)
+instead.
+
 **2. Know which application you are talking to.** The community edition serves **`LiveApp`**;
 `WebRTCAppEE` is the Enterprise edition's application and returns 404 here. Getting this wrong
 looks like a publish timeout with nothing at all in the server log. Check what your server has:
@@ -337,8 +341,15 @@ PASS live publish
 ANTMEDIA_E2E_DONE PASS (5 checks)
 ```
 
-**5. Confirm from the server, not only from the app.** The app asserting success is one half; the
-server having accepted the broadcast is the other:
+**A pass proves media.** The server confirms a publish before ICE connects, so the check does not
+stop there. It keeps publishing until `http://<server>:5080/LiveApp/streams/<id>.m3u8` lists a
+segment, and fails if none appears within 45 seconds or the publish ends first. Three things stop
+ICE connecting while signalling carries on working: an ICE candidate the client cannot route to,
+UDP blocked on the way to the server, and a sandboxed Mac app without
+`com.apple.security.network.server`.
+
+**5. If it fails, look at the server.** These lines show that signalling worked. They appear whether
+or not any media arrived, so they cannot stand in for the playlist:
 
 ```bash
 docker logs ams 2>&1 | grep -E 'offer|onAddStream|onCreate Success'
@@ -359,12 +370,13 @@ ANTMEDIA_TEST_SERVER="ws://localhost:5080/LiveApp/websocket" \
   ./.github/scripts/run-mac-device-tests.sh 1.0.0-local.1 net9.0-maccatalyst18.0
 ```
 
-Three things differ from the Android run, and each one fails in a way that does not name itself:
+Four things differ from the Android run, and each one fails in a way that does not name itself:
 
 - **The app must be launched through LaunchServices**, which is why the runner uses `open` rather
   than exec'ing the binary. macOS only shows the camera and microphone prompts for an app it
   launched; a binary started from a shell inherits the terminal's grants instead. Answer the prompt
-  the first time — until you do, the app sits waiting for it.
+  the first time — until you do, the app sits waiting for it. macOS ties the grant to the ad-hoc
+  signature, so a clean build or a change of entitlements asks again.
 - **The check asks for permission before it publishes**, deliberately. Without that, an unauthorised
   capture device produces no frames, every signalling step succeeds, and ten seconds later the
   server reports `WebRTC ingest is not started. So publish timeout is firing` — which reads like a
@@ -384,15 +396,17 @@ Three things differ from the Android run, and each one fails in a way that does 
 
   Ant Media's `settings.replaceCandidateAddrWithServerAddr` is not a shortcut here: `start.sh -r
   true` sets it in `red5-web.properties` and the candidate still went out as `172.17.0.2`.
-- **A pass proves signalling, not media.** The check stops as soon as the server confirms the
-  publish, which happens before ICE connects, so it passes even when no media can flow, and the
-  `docker logs` lines above appear either way. To prove media, publish from the sample for a few
-  seconds: `curl -I http://localhost:5080/LiveApp/streams/<id>.m3u8` returns 200 once the server
-  has written segments.
-- **A sandboxed app also needs `com.apple.security.network.server`.** The smoke-test app has no
-  sandbox, the sample does. Without that entitlement the sample shows `publishing <id>` and ICE
-  never connects. The published 2.17.2.6 on libwebrtc 150 does the same, so this is not a
-  regression to chase in a re-pin.
+
+  From the emulator this path is unreliable. ICE failed on 4 of 8 runs against the same server and
+  build, with the same server candidate as the runs that passed, for a reason not yet known. CI runs
+  the emulator on Linux, without Docker Desktop in the path. If logcat shows
+  `IceConnectionState: FAILED` here, run it again before suspecting the code.
+- **A sandboxed app also needs `com.apple.security.network.server`.** The smoke-test app signs with
+  the sample's `Entitlements.plist`, so it runs in the same sandbox. Without that entitlement
+  signalling still works and ICE never connects, so the check fails with `no media reached it`. The
+  published 2.17.2.6 on libwebrtc 150 does the same, so this is not a regression to chase in a
+  re-pin. To reproduce it, delete the key and the project's `bin` and `obj`, because an incremental
+  build keeps the old signature, and confirm with `codesign -d --entitlements :- <app>`.
 
 The iOS simulator has no camera or microphone, so the live check cannot run there at all; leave
 `ANTMEDIA_TEST_SERVER` unset and it reports `SKIP`.

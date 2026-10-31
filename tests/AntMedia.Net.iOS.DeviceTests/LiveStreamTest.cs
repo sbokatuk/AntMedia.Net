@@ -1,15 +1,17 @@
 using AVFoundation;
+using AntMedia.Net.DeviceTests;
 
 namespace AntMedia.Net.Apple.DeviceTests;
 
 /// <summary>
-/// Publishes to a real Ant Media Server and waits for it to confirm. The Apple counterpart of
+/// Publishes to a real Ant Media Server and proves that media arrived. The Apple counterpart of
 /// tests/AntMedia.Net.Android.DeviceTests/LiveStreamTest.cs, and deliberately the same shape.
 ///
 /// Everything else in this app is offline: it proves the native frameworks load and the bound API
 /// is callable, which is all a run without a server can do. This is the one check that proves a
-/// stream actually reaches somewhere — websocket signalling, SDP exchange, ICE, and the server
-/// accepting the broadcast.
+/// stream actually reaches somewhere — websocket signalling, SDP exchange, ICE, and media the
+/// server received and muxed. The server's own confirmation covers only the signalling; see
+/// <see cref="ServerMediaCheck" />.
 ///
 /// It runs through <see cref="IAntMediaClient" /> rather than the binding directly, so it covers
 /// the stack a consumer really uses, including PublishAsync's callback-to-Task bridge.
@@ -44,7 +46,7 @@ public static class LiveStreamTest
         using var client = new AntMediaClient(options);
 
         // No view is attached. The camera still runs and frames still reach the encoder; nothing
-        // here needs them on screen — the assertion is that the server accepted the broadcast.
+        // here needs them on screen — the assertion is that they reach the server.
         await client.PublishAsync(streamId);
 
         if (!client.IsStreaming)
@@ -53,8 +55,10 @@ public static class LiveStreamTest
                 "PublishAsync returned but the client does not consider itself streaming.");
         }
 
+        var media = await ServerMediaCheck.WaitForSegmentAsync(client, serverUrl, streamId, options.Timeout);
+
         client.Stop();
-        return $"published '{streamId}' to {serverUrl}";
+        return $"published '{streamId}' to {serverUrl}: {media}";
     }
 
     /// <summary>

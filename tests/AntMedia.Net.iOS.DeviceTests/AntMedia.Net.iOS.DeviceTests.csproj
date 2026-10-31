@@ -58,6 +58,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../Shared/ServerMediaCheck.cs" Link="ServerMediaCheck.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--
       The packed .nupkg from artifacts/ (exposed by NuGet.config), never the binding project:
       the e2e has to run against exactly what would be published.
