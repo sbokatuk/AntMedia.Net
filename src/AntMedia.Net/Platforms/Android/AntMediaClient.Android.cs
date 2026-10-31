@@ -1,4 +1,5 @@
 using Android.App;
+using Android.OS;
 using AntMedia.WebRTC.Api;
 using Org.Webrtc;
 
@@ -143,6 +144,16 @@ public sealed partial class AntMediaClient
             _whenConnected = null;
             start(client);
         };
+
+        // Installed before Init(), which otherwise builds the SDK's own handler and connects on
+        // this thread. Init() only sets up reconnection on a handler it built itself.
+        var webSocket = new BackgroundWebSocketHandler(client, new Handler(Looper.MyLooper()!));
+        client.SetWsHandler(webSocket);
+
+        if (_options.ReconnectionEnabled)
+        {
+            webSocket.SetupWsReconnection();
+        }
 
         client.Init();
     }
