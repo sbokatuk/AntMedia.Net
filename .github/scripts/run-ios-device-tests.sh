@@ -165,8 +165,10 @@ echo "==> launching"
 # a hang before that point is the loop below, which also says what the wait was spent on.
 #
 # simctl buffers its own "<bundle id>: <pid>" line until it exits, so anything in the log file while
-# it runs came from the app. A unix time, because `log show` reads its other formats in the
-# simulator's time zone.
+# it runs came from the app. The file is emptied here rather than left to the redirect below, which
+# happens in the background: the loop could read the previous run's log as this run's first output.
+# A unix time, because `log show` reads its other formats in the simulator's time zone.
+: > "${LOG_FILE}"
 launch_started="$(date +%s)"
 xcrun simctl launch --console-pty "${UDID}" "${BUNDLE_ID}" > "${LOG_FILE}" 2>&1 &
 launch_pid=$!
@@ -227,13 +229,13 @@ cat "${LOG_FILE}"
 print_launch_timeline
 
 if [ "${status}" -ne 0 ]; then
+    # 143 with no "<bundle id>: <pid>" line means SIGTERM reached simctl before the launch finished.
+    # Once the app is up, simctl hands the signal to it and exits 0.
     echo "==> simctl exited with status ${status}"
 fi
 
 if ! grep -q "ANTMEDIA_E2E_DONE PASS" "${LOG_FILE}"; then
-    # The timeline as well as the poll, which can miss a process that dies within a second. simctl
-    # waits for the launch to finish before it hands signals on, so a kill that leaves status 143
-    # and no "<bundle id>: <pid>" line also means no process.
+    # The timeline as well as the poll, which can miss a process that dies within a second.
     if [ -n "${app_started_after}" ]; then
         echo "==> the app process started ${app_started_after}s after launch (pid ${app_pid})"
     elif grep -q "Launch successful" "${LOG_FILE}"; then
