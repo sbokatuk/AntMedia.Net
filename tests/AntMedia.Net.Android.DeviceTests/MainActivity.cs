@@ -51,6 +51,22 @@ public class MainActivity : Activity
             }
         }
 
+        foreach (var (name, run) in WebSocketConnectTests.All)
+        {
+            total++;
+
+            try
+            {
+                Log.Info(Tag, $"    {await run(this)}");
+                Log.Info(Tag, $"PASS {name}");
+            }
+            catch (Exception exception)
+            {
+                failures++;
+                Log.Error(Tag, $"FAIL {name}: {exception}");
+            }
+        }
+
         // Only when a server was supplied. Most runs have none, and a skipped live check must not
         // look like a passing one, so it is reported either way.
         var serverUrl = Intent?.GetStringExtra("serverUrl");
