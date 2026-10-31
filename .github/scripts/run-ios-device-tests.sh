@@ -19,6 +19,15 @@ TARGET_FRAMEWORK="${2:-net10.0-ios26.0}"
 BUNDLE_ID="com.sbokatuk.antmedia.devicetests"
 LOG_FILE="device-tests-simulator.log"
 
+# Seconds from launch to the app's first line of output, then from that line to its exit. Two limits
+# because almost all the time goes before the first line, and it varies. On GitHub's macos-15 runners
+# that wait was 13s to 261s, and one run was killed at 300s with its launch still unfinished, while
+# the checks took about 3s. The second limit also covers the live check, which can take 90s more.
+STARTUP_TIMEOUT="${ANTMEDIA_STARTUP_TIMEOUT:-900}"
+CHECKS_TIMEOUT="${ANTMEDIA_CHECKS_TIMEOUT:-300}"
+# How often the log reports on an app that has not printed anything yet.
+REPORT_INTERVAL=30
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PROJECT="${REPO_ROOT}/tests/AntMedia.Net.iOS.DeviceTests/AntMedia.Net.iOS.DeviceTests.csproj"
 
@@ -77,6 +86,7 @@ if [ -z "${APP}" ]; then
     exit 1
 fi
 echo "==> built ${APP}"
+APP_NAME="$(basename "${APP}" .app)"
 
 # Newest available iPhone simulator. Pinning a specific device name would break every time the
 # runner image drops that model.
@@ -114,34 +124,128 @@ trap cleanup EXIT
 echo "==> installing"
 xcrun simctl install "${UDID}" "${APP}"
 
+# A simulator app is an ordinary host process, so this works whatever state the simulator is in.
+find_app_pid() {
+    pgrep -f "/Devices/${UDID}/data/Containers/Bundle/Application/.*/${APP_NAME}\.app/" | head -1 || true
+}
+
+report_progress() {
+    local app_state="no app process yet"
+    if [ -n "${app_pid}" ]; then
+        app_state="app process ${app_pid}, $(ps -o state=,time= -p "${app_pid}" \
+            | awk '{ print "state", $1, "cpu", $2 }' || echo exited)"
+    fi
+    echo "==> ${elapsed}s since launch, no output: ${app_state}; busiest:" \
+        "$(ps -Arco pcpu=,comm= | awk 'NR <= 3 { print $2, $1 "%" }' | paste -sd ',' -)"
+}
+
+# simctl passes signals on to the app, so one that ignores SIGTERM would leave simctl waiting.
+stop_launch() {
+    kill -TERM "${launch_pid}" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 "${launch_pid}" 2>/dev/null || return 0
+        sleep 1
+    done
+    kill -KILL "${launch_pid}" 2>/dev/null || true
+}
+
+# The simulator's own account of the launch. CoreSimulatorBridge retries a launch that fails, so its
+# attempts say where the time went before the app existed. 'Requesting launch' stays out of the
+# predicate because that message spells out the app's environment.
+print_launch_timeline() {
+    echo "==> launch timeline"
+    xcrun simctl spawn "${UDID}" log show --start "@${launch_started}" --style compact --predicate \
+        "(process == 'CoreSimulatorBridge' AND (eventMessage BEGINSWITH 'Beginning launch' OR eventMessage BEGINSWITH 'Launch ' OR eventMessage BEGINSWITH 'Error Launching')) OR (process == 'SpringBoard' AND eventMessage CONTAINS '${BUNDLE_ID}' AND (eventMessage CONTAINS 'Bootstrap success' OR eventMessage CONTAINS 'Process exited'))" \
+        2>/dev/null | cut -c1-200 | tee -a "${LOG_FILE}" || true
+}
+
 echo "==> launching"
 # --console-pty streams the app's stdout and blocks until it exits, so the app's own
-# Environment.Exit call is what ends this step. macOS has no coreutils timeout, so the guard
-# against a hang before that point is a watchdog that kills the launch.
+# Environment.Exit call is what ends this step. macOS has no coreutils timeout, so the guard against
+# a hang before that point is the loop below, which also says what the wait was spent on.
+#
+# simctl buffers its own "<bundle id>: <pid>" line until it exits, so anything in the log file while
+# it runs came from the app. The file is emptied here rather than left to the redirect below, which
+# happens in the background: the loop could read the previous run's log as this run's first output.
+# A unix time, because `log show` reads its other formats in the simulator's time zone.
+: > "${LOG_FILE}"
+launch_started="$(date +%s)"
 xcrun simctl launch --console-pty "${UDID}" "${BUNDLE_ID}" > "${LOG_FILE}" 2>&1 &
 launch_pid=$!
 
-( sleep 300; kill -TERM "${launch_pid}" 2>/dev/null ) &
-watchdog_pid=$!
-# Detached so the shell does not print a "Terminated" job notice over the test output when the
-# watchdog is killed on the happy path.
-disown "${watchdog_pid}" 2>/dev/null || true
+app_pid=""
+app_started_after=""
+first_output_after=""
+hang=""
+next_report="${REPORT_INTERVAL}"
+
+while kill -0 "${launch_pid}" 2>/dev/null; do
+    elapsed=$(( $(date +%s) - launch_started ))
+
+    if [ -z "${app_pid}" ]; then
+        app_pid="$(find_app_pid)"
+        if [ -n "${app_pid}" ]; then
+            app_started_after="${elapsed}"
+            echo "==> app process ${app_pid} started ${elapsed}s after launch"
+        fi
+    fi
+
+    if [ -z "${first_output_after}" ]; then
+        if [ -s "${LOG_FILE}" ]; then
+            first_output_after="${elapsed}"
+            echo "==> first output ${elapsed}s after launch"
+        elif [ "${elapsed}" -ge "${STARTUP_TIMEOUT}" ]; then
+            hang="no output ${elapsed}s after launch"
+        elif [ "${elapsed}" -ge "${next_report}" ]; then
+            report_progress
+            next_report=$(( next_report + REPORT_INTERVAL ))
+        fi
+    elif [ $(( elapsed - first_output_after )) -ge "${CHECKS_TIMEOUT}" ]; then
+        hang="no verdict $(( elapsed - first_output_after ))s after the first output"
+    fi
+
+    [ -z "${hang}" ] || break
+    sleep 1
+done
+
+if [ -n "${hang}" ]; then
+    echo "==> ${hang}; stopping the launch"
+    # Taken first, because the signal below reaches the app too, and limited with perl's alarm so
+    # that a stuck sample cannot keep the launch from being stopped.
+    if [ -n "${app_pid}" ]; then
+        perl -e 'alarm 120; exec @ARGV' sample "${app_pid}" 3 -mayDie 2>&1 \
+            | sed '/^Binary Images:/,$d' || true
+    fi
+    stop_launch
+fi
 
 set +e
 wait "${launch_pid}"
 status=$?
 set -e
-kill "${watchdog_pid}" 2>/dev/null || true
+echo "==> finished $(( $(date +%s) - launch_started ))s after launch"
 
 cat "${LOG_FILE}"
+print_launch_timeline
 
 if [ "${status}" -ne 0 ]; then
-    echo "==> the app exited with status ${status} (killed by the watchdog if it ran for 300s)"
+    # 143 with no "<bundle id>: <pid>" line means SIGTERM reached simctl before the launch finished.
+    # Once the app is up, simctl hands the signal to it and exits 0.
+    echo "==> simctl exited with status ${status}"
 fi
 
 if ! grep -q "ANTMEDIA_E2E_DONE PASS" "${LOG_FILE}"; then
-    echo "==> no passing verdict; capturing the simulator's crash log"
-    xcrun simctl spawn "${UDID}" log show --last 2m --predicate "process CONTAINS 'DeviceTests'" \
+    # The timeline as well as the poll, which can miss a process that dies within a second.
+    if [ -n "${app_started_after}" ]; then
+        echo "==> the app process started ${app_started_after}s after launch (pid ${app_pid})"
+    elif grep -q "Launch successful" "${LOG_FILE}"; then
+        echo "==> the app process started, and was gone before the next poll"
+    else
+        echo "==> the app process never started: the launch did not get that far"
+    fi
+
+    echo "==> no passing verdict; capturing the simulator's log of the app"
+    xcrun simctl spawn "${UDID}" log show --start "@${launch_started}" --predicate "process CONTAINS 'DeviceTests'" \
         2>/dev/null | tail -100 | tee -a "${LOG_FILE}" || true
     echo "::error::Ant Media iOS simulator smoke tests failed or timed out"
     exit 1
