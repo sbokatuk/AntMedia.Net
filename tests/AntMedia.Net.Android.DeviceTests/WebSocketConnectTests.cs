@@ -1,8 +1,10 @@
 using Android.App;
 using Android.OS;
+using AntMedia.WebRTC.Api;
 using DE.Tavendo.Autobahn;
 using Java.Net;
 using Java.Util.Concurrent;
+using Org.Webrtc;
 
 using Observer = DE.Tavendo.Autobahn.IWebSocket.IWebSocketConnectionObserver;
 
@@ -20,12 +22,24 @@ public static class WebSocketConnectTests
 {
     private static readonly TimeSpan Limit = TimeSpan.FromSeconds(20);
 
+    /// <summary>Long enough to catch one tick of the SDK's reconnector, which runs every 5s.</summary>
+    private static readonly TimeSpan ReconnectorTick = TimeSpan.FromSeconds(6);
+
     public static IReadOnlyList<(string Name, Func<Activity, Task<string>> Run)> All =>
     [
         ("connect recovers from a stall in createReader", _ => RecoversFromStallAsync(StallSite.Reader)),
         ("connect recovers from a stall in createWriter", _ => RecoversFromStallAsync(StallSite.Writer)),
+        ("a server hanging up during connect is survived", _ => SurvivesImmediateHangUpsAsync()),
+        ("a connect finishing after the session ended is closed", LateConnectIsClosedAsync),
         ("a refused connection fails the publish", RefusedConnectionFailsPublishAsync),
         ("publish completes over a background connect", PublishCompletesAsync),
+        ("a failed publish stops reconnecting", FailedPublishStopsReconnectingAsync),
+        ("a rejected publish stops the stream and closes the socket", RejectedPublishClosesSocketAsync),
+        ("stop waits for publish_finished, then closes the socket", StopWaitsForFinishedAsync),
+        ("stop closes the socket when the server never answers", StopGivesUpOnSilentServerAsync),
+        ("a failed publish can be retried on the same renderer", RetryKeepsRendererAsync),
+        ("a retry in the same turn as a cancelled start keeps the renderer", SameTurnRetryKeepsRendererAsync),
+        ("a new publish ends the running one and keeps the renderer", RestartKeepsRendererAsync),
     ];
 
     /// <summary>
@@ -55,6 +69,54 @@ public static class WebSocketConnectTests
 
         connection.Disconnect();
         return $"stalled in {site}, then opened on the main thread";
+    }
+
+    /// <summary>
+    /// A race between the reader failing the connection on the main thread and the writer thread
+    /// coming up, so one attempt proves little. Losing it takes the process down, and the verdict
+    /// with it. With the reader started first, that took one or two attempts on an emulator.
+    /// </summary>
+    private static async Task<string> SurvivesImmediateHangUpsAsync()
+    {
+        const int attempts = 200;
+
+        using var server = new FakeSignallingServer { DropBeforeUpgrade = true };
+
+        for (var i = 0; i < attempts; i++)
+        {
+            var observer = new ConnectionObserver();
+
+            new BackgroundWebSocketConnection().Connect(new URI(server.Url), observer);
+            await observer.Closed.Task.WaitAsync(Limit);
+        }
+
+        return $"{attempts} connections dropped mid-connect";
+    }
+
+    /// <summary>
+    /// A connect can't be cancelled, so it can finish after the session has ended, and nothing
+    /// left would ever close that socket. Both calls run before the main thread can hear back from
+    /// the connector, so the connect is always the one that comes second.
+    /// </summary>
+    private static async Task<string> LateConnectIsClosedAsync(Activity activity)
+    {
+        using var server = new FakeSignallingServer();
+
+        var client = new WebRTCClientBuilder()
+            .SetActivity(activity)
+            .SetServerUrl(server.Url)
+            .SetVideoCallEnabled(false)
+            .SetAudioCallEnabled(false)
+            .Build();
+
+        var webSocket = new BackgroundWebSocketHandler(client, new Handler(Looper.MainLooper!));
+
+        webSocket.Connect(server.Url);
+        webSocket.StopReconnector();
+
+        await WaitUntilAsync(() => server.Received.Contains("close"), "the late socket was left open");
+
+        return "the socket opened after the session had ended and closed itself";
     }
 
     /// <summary>
@@ -92,7 +154,7 @@ public static class WebSocketConnectTests
     {
         const string streamId = "fakesignalling";
 
-        using var server = new FakeSignallingServer { StreamId = streamId };
+        using var server = new FakeSignallingServer();
         using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
 
         await client.PublishAsync(streamId).WaitAsync(Limit);
@@ -105,6 +167,256 @@ public static class WebSocketConnectTests
 
         client.Stop();
         return $"published '{streamId}' to {server.Url}";
+    }
+
+    /// <summary>
+    /// The reconnector used to outlive the session for the life of the process, with each attempt
+    /// reporting Disconnected on a client that had already given up. Two ticks, because the first
+    /// one can fall just outside a short wait.
+    /// </summary>
+    private static async Task<string> FailedPublishStopsReconnectingAsync(Activity activity)
+    {
+        using var server = new FakeSignallingServer { DropBeforeUpgrade = true };
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        var disconnects = 0;
+        client.Disconnected += (_, _) => Interlocked.Increment(ref disconnects);
+
+        await PublishFailsAsync(client, "dropped");
+
+        var attempts = server.Connections;
+        var reported = Volatile.Read(ref disconnects);
+
+        await Task.Delay(ReconnectorTick * 2);
+
+        if (server.Connections != attempts)
+        {
+            throw new InvalidOperationException(
+                $"{server.Connections - attempts} connection attempts after the publish had failed.");
+        }
+
+        if (Volatile.Read(ref disconnects) != reported)
+        {
+            throw new InvalidOperationException("Disconnected was raised after the publish had failed.");
+        }
+
+        return $"{attempts} connection attempt, and none in the {(ReconnectorTick * 2).TotalSeconds:0}s after";
+    }
+
+    /// <summary>
+    /// The server is reachable and says no, so the socket is up when the start fails. That failure
+    /// arrives on a pool thread, where the SDK's websocket calls throw, so this also checks that
+    /// the stop reaches the server at all.
+    /// </summary>
+    private static async Task<string> RejectedPublishClosesSocketAsync(Activity activity)
+    {
+        const string streamId = "rejected";
+
+        using var server = new FakeSignallingServer { PublishError = "not_allowed" };
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        await PublishFailsAsync(client, streamId);
+
+        await WaitUntilAsync(() => server.Received.Contains($"stop {streamId}"), "the server was never told to stop");
+        await WaitUntilAsync(() => server.Open == 0, "the socket was left open");
+        await StaysClosedAsync(server);
+
+        return "stop reached the server, the socket closed and nothing reconnected";
+    }
+
+    /// <summary>
+    /// Stop() can't close the socket straight away, because publish_finished comes back over it
+    /// and PublishFinished is documented as following a stop.
+    /// </summary>
+    private static async Task<string> StopWaitsForFinishedAsync(Activity activity)
+    {
+        const string streamId = "stopped";
+
+        using var server = new FakeSignallingServer();
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.PublishFinished += (_, _) => finished.TrySetResult();
+
+        await client.PublishAsync(streamId).WaitAsync(Limit);
+        client.Stop();
+
+        await finished.Task.WaitAsync(Limit);
+        await WaitUntilAsync(() => server.Open == 0, "the socket was left open after publish_finished");
+        await StaysClosedAsync(server);
+
+        return "PublishFinished was raised, then the socket closed and nothing reconnected";
+    }
+
+    private static async Task<string> StopGivesUpOnSilentServerAsync(Activity activity)
+    {
+        using var server = new FakeSignallingServer { AnswersStop = false };
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        await client.PublishAsync("unanswered").WaitAsync(Limit);
+        client.Stop();
+
+        await WaitUntilAsync(() => server.Open == 0, "the socket was left open after an unanswered stop");
+        await StaysClosedAsync(server);
+
+        return "the socket closed without an answer and nothing reconnected";
+    }
+
+    /// <summary>
+    /// The session that failed has to hand the renderer back before the retry takes it: one still
+    /// initialised makes the retry throw, and one released late goes dark under the new session.
+    /// </summary>
+    private static async Task<string> RetryKeepsRendererAsync(Activity activity)
+    {
+        const string streamId = "retried";
+
+        using var server = new FakeSignallingServer { DropBeforeUpgrade = true };
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        var renderer = new SurfaceViewRenderer(activity);
+        client.SetLocalRenderer(renderer);
+
+        await PublishFailsAsync(client, streamId);
+
+        server.DropBeforeUpgrade = false;
+        await client.PublishAsync(streamId).WaitAsync(Limit);
+
+        await RendererStaysInitialisedAsync(renderer);
+        client.Stop();
+
+        return "the retry published and kept the renderer";
+    }
+
+    /// <summary>
+    /// A cancelled start is ended from a pool thread, so its end is queued to the main thread,
+    /// and here a retry follows in the same turn while the main thread stays busy until the
+    /// retry's socket has opened, the way a page busy laying itself out would hold it. The old
+    /// session's release has to land before the retry initialises the renderer all the same.
+    /// </summary>
+    private static async Task<string> SameTurnRetryKeepsRendererAsync(Activity activity)
+    {
+        const string streamId = "sameturn";
+
+        using var server = new FakeSignallingServer { ConfirmsPublish = false };
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        var renderer = new SurfaceViewRenderer(activity);
+        client.SetLocalRenderer(renderer);
+
+        using var cancel = new CancellationTokenSource();
+        var first = client.PublishAsync(streamId, cancellationToken: cancel.Token);
+
+        await WaitUntilAsync(() => server.Received.Contains($"publish {streamId}"), "the first publish never arrived");
+
+        cancel.Cancel();
+
+        while (!first.IsCompleted)
+        {
+            Thread.Sleep(1);
+        }
+
+        server.ConfirmsPublish = true;
+        var retry = client.PublishAsync(streamId);
+
+        // Until the retry's connection arrives, however the old one has ended.
+        var held = DateTime.UtcNow + Limit;
+
+        while (server.Connections < 2 && DateTime.UtcNow < held)
+        {
+            Thread.Sleep(1);
+        }
+
+        // Time for the client to read the upgrade and queue the open.
+        Thread.Sleep(200);
+
+        await retry.WaitAsync(Limit);
+
+        await RendererStaysInitialisedAsync(renderer);
+        client.Stop();
+
+        return "the retry published and kept the renderer";
+    }
+
+    /// <summary>The same hand-over as a retry, with the old session running when it happens.</summary>
+    private static async Task<string> RestartKeepsRendererAsync(Activity activity)
+    {
+        using var server = new FakeSignallingServer();
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        var renderer = new SurfaceViewRenderer(activity);
+        client.SetLocalRenderer(renderer);
+
+        await client.PublishAsync("first").WaitAsync(Limit);
+        await client.PublishAsync("second").WaitAsync(Limit);
+
+        await WaitUntilAsync(() => server.Received.Contains("stop first"), "the first stream was never stopped");
+        await WaitUntilAsync(() => server.Open == 1, "the first session's socket was left open");
+        await RendererStaysInitialisedAsync(renderer);
+        client.Stop();
+
+        return "stopped the first stream, published the second and kept the renderer";
+    }
+
+    private static async Task PublishFailsAsync(AntMediaClient client, string streamId)
+    {
+        try
+        {
+            await client.PublishAsync(streamId).WaitAsync(Limit);
+        }
+        catch (AntMediaException)
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"publishing '{streamId}' should have failed.");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, string failure)
+    {
+        var deadline = DateTime.UtcNow + Limit;
+
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                throw new InvalidOperationException(failure);
+            }
+
+            await Task.Delay(100);
+        }
+    }
+
+    private static async Task StaysClosedAsync(FakeSignallingServer server)
+    {
+        var attempts = server.Connections;
+
+        await Task.Delay(ReconnectorTick);
+
+        if (server.Connections != attempts)
+        {
+            throw new InvalidOperationException("the reconnector was still running after the session ended.");
+        }
+    }
+
+    /// <summary>
+    /// A renderer only says it is initialised by refusing to be initialised again. The wait gives
+    /// a release queued by the previous session the time to arrive.
+    /// </summary>
+    private static async Task RendererStaysInitialisedAsync(SurfaceViewRenderer renderer)
+    {
+        await Task.Delay(TimeSpan.FromSeconds(1));
+
+        try
+        {
+            renderer.Init(null, null);
+        }
+        catch (Java.Lang.IllegalStateException)
+        {
+            return;
+        }
+
+        renderer.Release();
+        throw new InvalidOperationException("the renderer was released under the running session.");
     }
 
     // Audio and video off: signalling is the point here, and the offline CI emulator has neither.
@@ -150,7 +462,11 @@ public static class WebSocketConnectTests
 
         private void Stall()
         {
-            Stalled.TrySetResult();
+            // BackgroundWebSocketConnection reaches CreateWriter twice.
+            if (!Stalled.TrySetResult())
+            {
+                return;
+            }
 
             try
             {
@@ -168,6 +484,9 @@ public static class WebSocketConnectTests
         public TaskCompletionSource Opened { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource Closed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public bool OpenedOnMainThread { get; private set; }
 
         public void OnOpen()
@@ -176,8 +495,11 @@ public static class WebSocketConnectTests
             Opened.TrySetResult();
         }
 
-        public void OnClose(Observer.WebSocketCloseNotification? notification, string? reason) =>
+        public void OnClose(Observer.WebSocketCloseNotification? notification, string? reason)
+        {
             Opened.TrySetException(new InvalidOperationException($"closed: {notification} {reason}"));
+            Closed.TrySetResult();
+        }
 
         public void OnTextMessage(string? payload)
         {

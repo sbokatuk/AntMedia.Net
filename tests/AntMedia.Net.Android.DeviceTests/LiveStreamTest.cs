@@ -41,6 +41,9 @@ public static class LiveStreamTest
 
         using var client = new AntMediaClient(options, activity);
 
+        var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        client.PublishFinished += (_, _) => finished.TrySetResult();
+
         // No renderer is attached. The emulator's fake camera still produces frames, and nothing
         // here needs them on screen — the assertion is that they reach the server.
         await client.PublishAsync(streamId);
@@ -54,6 +57,11 @@ public static class LiveStreamTest
         var media = await ServerMediaCheck.WaitForSegmentAsync(client, serverUrl, streamId, options.Timeout);
 
         client.Stop();
-        return $"published '{streamId}' to {serverUrl}: {media}";
+
+        // The real server's answer, which has to get back before the socket closes. The loopback
+        // server can't show how that lands against ICE going down at the same moment.
+        await finished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        return $"published '{streamId}' to {serverUrl}, and it finished: {media}";
     }
 }
