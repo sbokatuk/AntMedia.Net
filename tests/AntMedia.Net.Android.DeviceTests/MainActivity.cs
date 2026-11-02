@@ -51,7 +51,7 @@ public class MainActivity : Activity
             }
         }
 
-        foreach (var (name, run) in WebSocketConnectTests.All)
+        foreach (var (name, run) in WebSocketConnectTests.All.Concat(RemoteTrackTests.All))
         {
             total++;
 

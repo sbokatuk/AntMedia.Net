@@ -172,6 +172,31 @@ straight after the real `createReader()` and `createWriter()`. That app also com
 `BackgroundWebSocketConnection`, so the first breakpoints are on `AntMediaConnector` and recover. The
 main-thread hit only exists on a package without the workaround.
 
+#### Remote tracks
+
+`IWebRTCListener.onNewVideoTrack` has two overloads, and `Metadata.xml` renames the two-argument
+one to `OnNewVideoTrackWithId` so the binding compiles. `WebRTCClient.onAddTrack` calls only that
+one. `DefaultWebRTCListener`'s one-argument overload just forwards to it. So `TrackAdded` is raised
+from `OnNewVideoTrackWithId`. In 2.17.2.2 to 2.17.2.6 it was wired to the one-argument overload,
+so on Android it never fired.
+
+The client's listener calls base in both track callbacks, because `DefaultWebRTCListener` is what
+binds a track to a remote renderer:
+
+- On a new track it takes the first renderer whose tag is null, sets the tag to the track and
+  attaches it.
+- On `onVideoTrackEnded` it releases that renderer and clears the tag. Without that the renderer
+  keeps the dead track, so the next track in the session finds no free renderer.
+
+`onVideoTrackEnded` comes from libwebrtc's `onRemoveTrack`, which only a renegotiation that stops a
+remote track sends, as in a multitrack play. A stream that simply ends arrives as `play_finished`
+instead, and the renderer is freed by `release()` when the session stops.
+
+Callbacks from a superseded session skip base as well as the event. The renderers carry over from
+one session to the next, and Ant Media gives every session the same track ids
+(`ARDAMSvvideoTrack0`), so a late callback would take or release the renderer the current session
+is using.
+
 ### iOS
 
 `native/ios/fetch-ios.sh` clones [WebRTC-iOS-SDK][ios-sdk] at the pinned commit, compiles our
@@ -334,6 +359,12 @@ Catalyst runner has no camera and nobody to answer the permission prompt. Both A
 The Android app also runs `WebSocketConnectTests` on every run, against a signalling server of its
 own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. That server only
 answers the websocket upgrade and confirms the publish, so these checks say nothing about media.
+
+`RemoteTrackTests` uses the same server to play, which the community server can't do. It sends the
+video section of an offer that the Enterprise edition sent this SDK, and then a renegotiation that
+stops the track. The SDK sets both offers on a real peer connection, so `TrackAdded`,
+`TrackRemoved` and the renderer handling run as they do against a real server. With no ICE no
+frame arrives, so these checks show which track the renderer holds, not that anything is drawn.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:

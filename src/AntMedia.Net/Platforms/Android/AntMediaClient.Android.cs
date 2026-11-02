@@ -361,20 +361,34 @@ public sealed partial class AntMediaClient
             }
         }
 
-        public override void OnNewVideoTrack(VideoTrack? track)
+        // The two-argument overload, renamed in Metadata.xml, is the only one the SDK calls:
+        // onAddTrack passes the track id as well. The one-argument overload just forwards here.
+        //
+        // Base is what attaches the track to a free remote renderer, so it has to run, and on
+        // track end it releases that renderer so the next track can have it. Both are skipped for
+        // a superseded session along with the event: the renderers outlive it, and its tracks
+        // carry the same ids as the current session's, so its late callbacks would take or
+        // release the renderer the current session is using.
+        public override void OnNewVideoTrackWithId(VideoTrack? track, string? trackId)
         {
-            if (!Stale && track is not null)
+            if (Stale || track is null)
             {
-                owner.RaiseTrackAdded(track.Id() ?? string.Empty, track.Kind() ?? "video");
+                return;
             }
+
+            base.OnNewVideoTrackWithId(track, trackId);
+            owner.RaiseTrackAdded(track.Id() ?? string.Empty, track.Kind() ?? "video");
         }
 
         public override void OnVideoTrackEnded(VideoTrack? track)
         {
-            if (!Stale && track is not null)
+            if (Stale || track is null)
             {
-                owner.RaiseTrackRemoved(track.Id() ?? string.Empty, track.Kind() ?? "video");
+                return;
             }
+
+            base.OnVideoTrackEnded(track);
+            owner.RaiseTrackRemoved(track.Id() ?? string.Empty, track.Kind() ?? "video");
         }
     }
 
