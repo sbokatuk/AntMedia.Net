@@ -166,23 +166,45 @@ public sealed partial class AntMediaClient
     ///
     ///     Failed to set local offer sdp: The order of m-lines in subsequent offer doesn't match
     ///
-    /// Init() opens the socket without requesting a stream, so by the time publish() runs there
-    /// is nothing queued for the connect handler to re-send.
+    /// ConnectWebSocket() opens the socket without requesting a stream, so by the time publish()
+    /// runs there is nothing queued for the connect handler to re-send.
+    ///
+    /// It is ConnectWebSocket() rather than Init(), because publish(), play() and join() each call
+    /// Init() again, and Init() isn't safe to repeat while its first run is still going. It checks
+    /// for a peer connection factory, then has a shared executor build one, and a second call can
+    /// land while the first factory is still being built: either the SDK throws "PeerConnectionFactory
+    /// has already been constructed" from inside this callback, which ends the process, or it builds
+    /// a second factory and the tracks and the peer connection come from different ones. Releasing
+    /// the previous session queues work on that executor ahead of the new factory, which made both
+    /// common.
+    ///
+    /// It also keeps the renderers apart. They carry over from one session to the next, and
+    /// release() hands them back through a post to this thread, which Init() inside publish() now
+    /// always comes after. Before, a renderer still held by the last session made Init() throw
+    /// "Already initialized".
     /// </summary>
     private void WhenConnected(SessionKind kind, string streamId, Action<NativeClient> start)
     {
         var client = Build(kind, streamId);
-        var thread = _clientThread!;
 
         _whenConnected = () =>
         {
             _whenConnected = null;
-            start(client);
+
+            // Called from the SDK's callback, where an exception would take the process down.
+            try
+            {
+                start(client);
+            }
+            catch (Exception exception)
+            {
+                _pending?.TrySetException(exception);
+            }
         };
 
-        // Installed before Init(), which otherwise builds the SDK's own handler and connects on
-        // this thread. Init() only sets up reconnection on a handler it built itself.
-        var webSocket = new BackgroundWebSocketHandler(client, thread);
+        // Installed before ConnectWebSocket(), which otherwise builds the SDK's own handler and
+        // connects on this thread, and only sets up reconnection on a handler it built itself.
+        var webSocket = new BackgroundWebSocketHandler(client, _clientThread!);
         client.SetWsHandler(webSocket);
         _webSocket = webSocket;
 
@@ -191,26 +213,7 @@ public sealed partial class AntMediaClient
             webSocket.SetupWsReconnection();
         }
 
-        // Queued rather than called. The renderers carry over from one session to the next, and
-        // release() hands them back through this same queue. Init() on a renderer still held by
-        // the last session throws "Already initialized", and that session's release arriving
-        // after Init() would darken the new one.
-        thread.Post(() =>
-        {
-            if (!ReferenceEquals(_client, client))
-            {
-                return;
-            }
-
-            try
-            {
-                client.Init();
-            }
-            catch (Exception exception)
-            {
-                _pending?.TrySetException(exception);
-            }
-        });
+        client.ConnectWebSocket();
     }
 
     private NativeClient Build(SessionKind kind, string streamId)
