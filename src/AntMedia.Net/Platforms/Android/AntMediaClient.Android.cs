@@ -53,6 +53,12 @@ public sealed partial class AntMediaClient
     private NativeClient? _finishing;
 
     /// <summary>
+    /// The end of a session stopped from another thread, queued to the client's thread and not
+    /// run yet. Whichever comes first runs it: that post, or the next session starting.
+    /// </summary>
+    private Action? _ending;
+
+    /// <summary>
     /// Incremented by <see cref="Build" />, and by <see cref="StopCore" /> for a session nobody is
     /// waiting to hear from. The bridges carry the value they were created with, so a callback
     /// from a native client that has since been replaced — a publish that timed out and was
@@ -220,8 +226,10 @@ public sealed partial class AntMediaClient
     {
         StopCore();
 
-        // A session being replaced isn't waited for: its callbacks are about to go stale, and it
-        // has to give up the renderers ahead of the next one.
+        // The last session ends completely before this one starts: an end still queued from
+        // another thread runs now, and a stopped session isn't waited for any longer. Its
+        // callbacks are about to go stale, and it has to give up the renderers first.
+        RunEnding();
         ReleaseFinishing();
 
         var session = Interlocked.Increment(ref _session);
@@ -299,7 +307,9 @@ public sealed partial class AntMediaClient
             return;
         }
 
-        var webSocket = _webSocket!;
+        // Cleared as well: the SDK's handler holds the client, and the client's config holds the
+        // Activity, which an idle client would otherwise keep alive.
+        var webSocket = Interlocked.Exchange(ref _webSocket, null);
         var thread = _clientThread!;
         var streamId = _sessionStreamId ?? string.Empty;
         var waitForServer = _confirmed && !_disposed;
@@ -309,12 +319,22 @@ public sealed partial class AntMediaClient
             Interlocked.Increment(ref _session);
         }
 
-        RunOn(thread, () => EndSession(client, webSocket, thread, streamId, waitForServer));
+        if (Looper.MyLooper() == thread.Looper)
+        {
+            EndSession(client, webSocket, thread, streamId, waitForServer);
+        }
+        else
+        {
+            _ending = () => EndSession(client, webSocket, thread, streamId, waitForServer);
+            thread.Post(RunEnding);
+        }
     }
+
+    private void RunEnding() => Interlocked.Exchange(ref _ending, null)?.Invoke();
 
     private void EndSession(
         NativeClient client,
-        BackgroundWebSocketHandler webSocket,
+        BackgroundWebSocketHandler? webSocket,
         Handler thread,
         string streamId,
         bool waitForServer)
@@ -338,7 +358,7 @@ public sealed partial class AntMediaClient
         }
 
         // Leaves the open socket alone, so the answer still arrives.
-        webSocket.StopReconnector();
+        webSocket?.StopReconnector();
 
         _finishing = client;
 

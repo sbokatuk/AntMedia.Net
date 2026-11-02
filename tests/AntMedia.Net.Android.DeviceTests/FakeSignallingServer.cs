@@ -44,6 +44,9 @@ internal sealed partial class FakeSignallingServer : IDisposable
     /// <summary>Answers a publish with this error instead of confirming it.</summary>
     public string? PublishError { get; init; }
 
+    /// <summary>False leaves a publish unanswered, so the start stays pending.</summary>
+    public bool ConfirmsPublish { get; set; } = true;
+
     /// <summary>False leaves a stop unanswered, as a server that has hung would.</summary>
     public bool AnswersStop { get; init; } = true;
 
@@ -146,7 +149,7 @@ internal sealed partial class FakeSignallingServer : IDisposable
             {
                 "publish" when PublishError is not null =>
                     $$"""{"command":"error","definition":"{{PublishError}}","streamId":"{{streamId}}"}""",
-                "publish" =>
+                "publish" when ConfirmsPublish =>
                     $$"""{"command":"notification","definition":"publish_started","streamId":"{{streamId}}"}""",
                 "stop" when AnswersStop =>
                     $$"""{"command":"notification","definition":"publish_finished","streamId":"{{streamId}}"}""",

@@ -38,6 +38,7 @@ public static class WebSocketConnectTests
         ("stop waits for publish_finished, then closes the socket", StopWaitsForFinishedAsync),
         ("stop closes the socket when the server never answers", StopGivesUpOnSilentServerAsync),
         ("a failed publish can be retried on the same renderer", RetryKeepsRendererAsync),
+        ("a retry in the same turn as a cancelled start keeps the renderer", SameTurnRetryKeepsRendererAsync),
         ("a new publish ends the running one and keeps the renderer", RestartKeepsRendererAsync),
     ];
 
@@ -279,6 +280,56 @@ public static class WebSocketConnectTests
 
         server.DropBeforeUpgrade = false;
         await client.PublishAsync(streamId).WaitAsync(Limit);
+
+        await RendererStaysInitialisedAsync(renderer);
+        client.Stop();
+
+        return "the retry published and kept the renderer";
+    }
+
+    /// <summary>
+    /// A cancelled start is ended from a pool thread, so its end is queued to the main thread,
+    /// and here a retry follows in the same turn while the main thread stays busy until the
+    /// retry's socket has opened, the way a page busy laying itself out would hold it. The old
+    /// session's release has to land before the retry initialises the renderer all the same.
+    /// </summary>
+    private static async Task<string> SameTurnRetryKeepsRendererAsync(Activity activity)
+    {
+        const string streamId = "sameturn";
+
+        using var server = new FakeSignallingServer { ConfirmsPublish = false };
+        using var client = new AntMediaClient(Options(server.Url, reconnection: true), activity);
+
+        var renderer = new SurfaceViewRenderer(activity);
+        client.SetLocalRenderer(renderer);
+
+        using var cancel = new CancellationTokenSource();
+        var first = client.PublishAsync(streamId, cancellationToken: cancel.Token);
+
+        await WaitUntilAsync(() => server.Received.Contains($"publish {streamId}"), "the first publish never arrived");
+
+        cancel.Cancel();
+
+        while (!first.IsCompleted)
+        {
+            Thread.Sleep(1);
+        }
+
+        server.ConfirmsPublish = true;
+        var retry = client.PublishAsync(streamId);
+
+        // Both sockets open: the old one is only closed by the end still queued.
+        var held = DateTime.UtcNow + Limit;
+
+        while (server.Open < 2 && DateTime.UtcNow < held)
+        {
+            Thread.Sleep(1);
+        }
+
+        // Time for the client to read the upgrade and queue the open.
+        Thread.Sleep(200);
+
+        await retry.WaitAsync(Limit);
 
         await RendererStaysInitialisedAsync(renderer);
         client.Stop();
