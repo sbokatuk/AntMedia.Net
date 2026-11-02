@@ -14,6 +14,9 @@ namespace AntMedia.Net.Android.DeviceTests;
 /// a pass here says the signalling path works and nothing about streaming; that is the live
 /// check's job, and this one runs on the offline CI job, which has no server.
 ///
+/// Given an <see cref="Offer" /> it plays as well, which the community server can't: the client
+/// gets the offer, sets it on a real peer connection and answers it, and only ICE never starts.
+///
 /// With no media there is no ICE either, so the SDK's own release on ICE disconnect never fires
 /// here. Whatever ends a session in these checks had to come from the client.
 /// </summary>
@@ -29,6 +32,12 @@ internal sealed partial class FakeSignallingServer : IDisposable
 
     private int _connections;
     private int _open;
+
+    private readonly TaskCompletionSource _commandReceived =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private readonly TaskCompletionSource<bool> _answered =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public FakeSignallingServer()
     {
@@ -58,6 +67,34 @@ internal sealed partial class FakeSignallingServer : IDisposable
 
     /// <summary>What the client has asked for, as "command streamId", or "close".</summary>
     public IReadOnlyCollection<string> Received => _received;
+
+    /// <summary>
+    /// The server's offer, sent when the client plays, followed by play_started. Ant Media sends
+    /// play_started once ICE connects, and there is no ICE here, so it goes at once.
+    /// </summary>
+    public string? Offer { get; init; }
+
+    /// <summary>Holds the <see cref="Offer" /> back until this completes.</summary>
+    public Task? OfferAfter { get; init; }
+
+    /// <summary>
+    /// A second offer, sent once the client's answer to the first arrives. The client sends that
+    /// only after setting the first offer, so it is ready for another.
+    /// </summary>
+    public string? Renegotiation { get; init; }
+
+    /// <summary>Holds the <see cref="Renegotiation" /> back until this completes.</summary>
+    public Task? RenegotiationAfter { get; init; }
+
+    /// <summary>Completes when the client's first command arrives.</summary>
+    public Task CommandReceived => _commandReceived.Task;
+
+    /// <summary>
+    /// True once the client answers the last offer: the <see cref="Renegotiation" /> if there is
+    /// one, the <see cref="Offer" /> if not. It answers only after setting the offer, so every track
+    /// callback for it has run by then. False if the connection ends first.
+    /// </summary>
+    public Task<bool> Answered => _answered.Task;
 
     public void Dispose() => _listener.Stop();
 
@@ -119,11 +156,18 @@ internal sealed partial class FakeSignallingServer : IDisposable
             {
                 // The client went away.
             }
+            finally
+            {
+                _answered.TrySetResult(false);
+            }
         }
     }
 
     private async Task ServeFramesAsync(NetworkStream stream)
     {
+        var finished = "publish_finished";
+        var answers = 0;
+
         while (true)
         {
             var (opcode, payload) = await ReadFrameAsync(stream).ConfigureAwait(false);
@@ -144,15 +188,48 @@ internal sealed partial class FakeSignallingServer : IDisposable
 
             var (command, streamId) = ParseCommand(payload);
             _received.Enqueue($"{command} {streamId}");
+            _commandReceived.TrySetResult();
+
+            if (command == "play" && Offer is not null)
+            {
+                finished = "play_finished";
+
+                if (OfferAfter is not null)
+                {
+                    await OfferAfter.ConfigureAwait(false);
+                }
+
+                await stream.WriteAsync(TextFrame(Configuration(Offer, streamId))).ConfigureAwait(false);
+                await stream.WriteAsync(TextFrame(Notification("play_started", streamId))).ConfigureAwait(false);
+                continue;
+            }
+
+            // The client's answer to an offer. ICE candidates are a command of their own.
+            if (command == "takeConfiguration")
+            {
+                if (++answers == 1 && Renegotiation is not null)
+                {
+                    if (RenegotiationAfter is not null)
+                    {
+                        await RenegotiationAfter.ConfigureAwait(false);
+                    }
+
+                    await stream.WriteAsync(TextFrame(Configuration(Renegotiation, streamId))).ConfigureAwait(false);
+                }
+                else
+                {
+                    _answered.TrySetResult(true);
+                }
+
+                continue;
+            }
 
             var reply = command switch
             {
                 "publish" when PublishError is not null =>
                     $$"""{"command":"error","definition":"{{PublishError}}","streamId":"{{streamId}}"}""",
-                "publish" when ConfirmsPublish =>
-                    $$"""{"command":"notification","definition":"publish_started","streamId":"{{streamId}}"}""",
-                "stop" when AnswersStop =>
-                    $$"""{"command":"notification","definition":"publish_finished","streamId":"{{streamId}}"}""",
+                "publish" when ConfirmsPublish => Notification("publish_started", streamId),
+                "stop" when AnswersStop => Notification(finished, streamId),
                 _ => null,
             };
 
@@ -201,12 +278,25 @@ internal sealed partial class FakeSignallingServer : IDisposable
         return (header[0] & 0x0F, payload);
     }
 
+    private static string Notification(string definition, string? streamId) =>
+        $$"""{"command":"notification","definition":"{{definition}}","streamId":"{{streamId}}"}""";
+
+    private static string Configuration(string offer, string? streamId) =>
+        $$"""{"command":"takeConfiguration","streamId":"{{streamId}}","type":"offer","sdp":"{{JsonEncodedText.Encode(offer)}}"}""";
+
     private static byte[] TextFrame(string text)
     {
         var payload = Encoding.UTF8.GetBytes(text);
 
-        // Short frames only: FIN + text opcode, then a 7-bit length, unmasked from a server.
-        return [0x81, checked((byte)payload.Length), .. payload];
+        // FIN + text opcode, unmasked from a server. A notification fits a 7-bit length, and an
+        // offer needs the 16-bit one.
+        if (payload.Length < 126)
+        {
+            return [0x81, (byte)payload.Length, .. payload];
+        }
+
+        var length = checked((ushort)payload.Length);
+        return [0x81, 126, (byte)(length >> 8), (byte)length, .. payload];
     }
 
     [GeneratedRegex("Sec-WebSocket-Key:(.*)", RegexOptions.IgnoreCase)]

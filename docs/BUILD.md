@@ -213,6 +213,45 @@ place and `Init()` still called first, the loopback checks hit the throw in 2 of
 a second factory in each of the 6 runs where the builds were counted. Opening the socket this way,
 the same checks build exactly one factory per session that reaches the server, every time.
 
+#### Remote tracks
+
+`IWebRTCListener.onNewVideoTrack` has two overloads, and `Metadata.xml` renames the two-argument
+one to `OnNewVideoTrackWithId` so the binding compiles. `WebRTCClient.onAddTrack` calls only that
+one. `DefaultWebRTCListener`'s one-argument overload just forwards to it. So `TrackAdded` is raised
+from `OnNewVideoTrackWithId`. In 2.17.2.2 to 2.17.2.6 it was wired to the one-argument overload,
+so on Android it never fired.
+
+The client's listener calls base in both track callbacks, because `DefaultWebRTCListener` is what
+binds a track to a remote renderer:
+
+- On a new track it takes the first renderer whose tag is null, sets the tag to the track and
+  attaches it.
+- On `onVideoTrackEnded` it releases that renderer and clears the tag. Without that the renderer
+  keeps the dead track, so the next track in the session finds no free renderer.
+
+`onVideoTrackEnded` comes from libwebrtc's `onRemoveTrack`, which only a renegotiation that stops a
+remote track sends, as in a multitrack play. A stream that simply ends arrives as `play_finished`
+instead, and the renderer is freed by `release()` when the session ends, as above.
+
+Three more things keep the renderer right:
+
+- **Only the current client touches it.** A track callback from a client that has been replaced,
+  stopped or disposed skips base as well as the event. The renderers carry over from one session to
+  the next, and Ant Media gives every session the same track ids (`ARDAMSvvideoTrack0`), so a late
+  callback would take or release the renderer the current session is using. It matters even
+  without a next session: a play's offer can arrive just after `Stop()`, and a confirmed play keeps
+  its socket open until `play_finished`, so a renegotiation can arrive while it waits.
+- **The check and base run under a lock that `StopCore()` takes to let the client go.** The SDK does
+  its renderer work in posts to the main thread, so a callback's work is either queued before the
+  client goes, and runs before anything the next session queues, or not queued at all.
+  `DisposeCore()` posts the remote renderer's release for the same reason: released straight away,
+  an attach already queued would initialise it again.
+- **A track that finds the renderer taken waits for it.** In one renegotiation libwebrtc reports the
+  tracks it adds before the ones it removes. So a track that replaces another in the same offer
+  arrives while the old one still holds the renderer, and then the old one's release leaves the
+  renderer empty. The listener keeps the latest such track and attaches it from a post queued
+  behind the release.
+
 ### iOS
 
 `native/ios/fetch-ios.sh` clones [WebRTC-iOS-SDK][ios-sdk] at the pinned commit, compiles our
@@ -377,6 +416,14 @@ own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. 
 the websocket upgrade, a publish, a stop and a close, and can hang up or refuse on request, so these
 checks cover how a session ends and say nothing about media. With no ICE, the SDK's own `release()`
 never fires there, so a session those checks see end was ended by the binding.
+
+`RemoteTrackTests` uses the same server to play, which the community server can't do. It sends the
+video section of an offer that the Enterprise edition sent this SDK. Depending on the check, it
+follows that with a renegotiation that stops the track or replaces it, or it holds the offer or the
+renegotiation back until after `Stop()`. A renegotiation goes out only once the client's answer
+frame has arrived. The SDK sets every offer on a real peer connection, so `TrackAdded`,
+`TrackRemoved` and the renderer handling run as they do against a real server. With no ICE no frame
+arrives, so these checks show which track the renderer holds, not that anything is drawn.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:
