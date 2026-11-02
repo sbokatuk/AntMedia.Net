@@ -133,9 +133,14 @@ rule of its own. A watchdog interrupts the thread if it stalls. All four waits c
 
 Ant Media tried the same idea in [#116][android-sdk-116] and reverted it in
 [#117][android-sdk-117], without saying why. `WebSocketHandler` still has that code, commented out.
-Their version needed three things this one handles: the connect's error path calls `disconnect()`,
-which throws off the client's thread; a failed connect reports `onClose` on the wrong thread; and
-the reconnector starts another attempt every 5 seconds while one is running.
+Their version needed four things this one handles: the connect's error path calls `disconnect()`,
+which throws off the client's thread; a failed connect reports `onClose` on the wrong thread; the
+reconnector starts another attempt every 5 seconds while one is running; and the main thread can now
+handle a failure while the connect is still going. That last one ends the process if it's missed.
+Autobahn starts the reader first, so a server that hangs up straight away has `failConnection()`
+forwarding to a writer whose thread has no `Handler` yet, which is a `NullPointerException` on the
+main thread. It took one or two attempts on an emulator, so this class starts the writer first.
+`disconnect()` forwards to the writer in the same way, so the handler holds it back during a connect.
 
 Code that calls `WebRTCClient` directly doesn't go through any of this and can still freeze.
 
@@ -172,6 +177,42 @@ straight after the real `createReader()` and `createWriter()`. That app also com
 `BackgroundWebSocketConnection`, so the first breakpoints are on `AntMediaConnector` and recover. The
 main-thread hit only exists on a package without the workaround.
 
+#### How a session ends
+
+`WebRTCClient.stop()` only tells the server to stop, and only when the socket is up. The camera, the
+peer connection factory, the socket and the 5-second reconnector all go in `release()`, and the SDK
+calls that itself in one place: when ICE disconnects after a stop. A start that failed never gets
+there, so `AntMediaClient.StopCore()` has to end the session itself. Which way depends on whether
+the server still has something to say:
+
+| Session being stopped | What happens | Why |
+|---|---|---|
+| Never confirmed: a failed start, or `Stop()` during one | `stop()`, then `release(true)` | No `publish_finished` will come. Its callbacks are dropped too, so `Disconnected` stops firing on a client that has given up. |
+| Confirmed, socket up | `stop()`, `stopReconnector()`, then `release(true)` on `publish_finished` or `play_finished`, or after 5 seconds | `release(true)` closes the socket the answer arrives on, so `PublishFinished` would be lost. `stopReconnector()` alone leaves an open socket untouched. |
+| Confirmed, socket down | `stop()`, then `release(true)` | The server can't be told, so closing the peer connection is the only thing that ends the stream. |
+| Replaced by a new operation | As above, then `release(true)` at once | Its callbacks are about to go stale anyway. |
+
+The other thing `release()` touches is the renderers, which outlive a session. It releases them
+through a post to the main thread, and the next session must not initialise them first. If it did,
+`init()` would throw `Already initialized`, or the new preview would go dark when the release
+arrived.
+
+So a new session first runs whatever is left of the last one, including an end queued from a
+pool thread, as a cancelled or failed start's is. It also opens its socket with
+`connectWebSocket()` and leaves `init()` to `publish()`, `play()` or `join()`, which run only once
+the socket is open, after any such post.
+
+There is a second reason for that. `init()` isn't safe to run twice in quick succession, which
+calling `Init()` before `publish()` did. It checks for a peer connection factory, then has a
+single-thread executor shared by every client build one, so a second call can arrive while the first
+factory is still being built. Either the SDK throws `PeerConnectionFactory has already been
+constructed` inside a callback, which ends the process, or it quietly builds a second factory, and
+the tracks and the peer connection come from different factories. Releasing a session queues its
+teardown on that executor ahead of the next factory, which makes both likelier. With releases in
+place and `Init()` still called first, the loopback checks hit the throw in 2 of 11 runs, and built
+a second factory in each of the 6 runs where the builds were counted. Opening the socket this way,
+the same checks build exactly one factory per session that reaches the server, every time.
+
 #### Remote tracks
 
 `IWebRTCListener.onNewVideoTrack` has two overloads, and `Metadata.xml` renames the two-argument
@@ -190,15 +231,16 @@ binds a track to a remote renderer:
 
 `onVideoTrackEnded` comes from libwebrtc's `onRemoveTrack`, which only a renegotiation that stops a
 remote track sends, as in a multitrack play. A stream that simply ends arrives as `play_finished`
-instead, and the renderer is freed by `release()` when the session stops.
+instead, and the renderer is freed by `release()` when the session ends, as above.
 
 Three more things keep the renderer right:
 
 - **Only the current client touches it.** A track callback from a client that has been replaced,
   stopped or disposed skips base as well as the event. The renderers carry over from one session to
   the next, and Ant Media gives every session the same track ids (`ARDAMSvvideoTrack0`), so a late
-  callback would take or release the renderer the current session is using. A play's offer can
-  still arrive after `Stop()`, so this matters even without a next session.
+  callback would take or release the renderer the current session is using. It matters even
+  without a next session: a play's offer can arrive just after `Stop()`, and a confirmed play keeps
+  its socket open until `play_finished`, so a renegotiation can arrive while it waits.
 - **The check and base run under a lock that `StopCore()` takes to let the client go.** The SDK does
   its renderer work in posts to the main thread, so a callback's work is either queued before the
   client goes, and runs before anything the next session queues, or not queued at all.
@@ -370,16 +412,18 @@ Catalyst runner has no camera and nobody to answer the permission prompt. Both A
 — see below.
 
 The Android app also runs `WebSocketConnectTests` on every run, against a signalling server of its
-own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. That server only
-answers the websocket upgrade and confirms the publish, so these checks say nothing about media.
+own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. That server answers
+the websocket upgrade, a publish, a stop and a close, and can hang up or refuse on request, so these
+checks cover how a session ends and say nothing about media. With no ICE, the SDK's own `release()`
+never fires there, so a session those checks see end was ended by the binding.
 
 `RemoteTrackTests` uses the same server to play, which the community server can't do. It sends the
 video section of an offer that the Enterprise edition sent this SDK. Depending on the check, it
-follows that with a renegotiation that stops the track or replaces it, or it holds the offer back
-until after `Stop()`. A renegotiation goes out only once the client's answer frame has arrived. The
-SDK sets every offer on a real peer connection, so `TrackAdded`, `TrackRemoved` and the renderer
-handling run as they do against a real server. With no ICE no frame arrives, so these checks show
-which track the renderer holds, not that anything is drawn.
+follows that with a renegotiation that stops the track or replaces it, or it holds the offer or the
+renegotiation back until after `Stop()`. A renegotiation goes out only once the client's answer
+frame has arrived. The SDK sets every offer on a real peer connection, so `TrackAdded`,
+`TrackRemoved` and the renderer handling run as they do against a real server. With no ICE no frame
+arrives, so these checks show which track the renderer holds, not that anything is drawn.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:

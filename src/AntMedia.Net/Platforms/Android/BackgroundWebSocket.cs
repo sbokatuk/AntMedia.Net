@@ -33,6 +33,8 @@ internal sealed class BackgroundWebSocketHandler : WebSocketHandler
 
     private BackgroundWebSocketConnection? _connection;
 
+    private bool _reconnectorStopped;
+
     public BackgroundWebSocketHandler(IAntMediaSignallingEvents events, Handler handler)
         : base(events, handler)
     {
@@ -56,13 +58,44 @@ internal sealed class BackgroundWebSocketHandler : WebSocketHandler
 
     /// <summary>
     /// WebRTCClient.connectWebSocket() disconnects a handler it did not create before connecting
-    /// it, and the SDK's disconnect() dereferences a connection that does not exist yet.
+    /// it, and the SDK's disconnect() dereferences a connection that does not exist yet. One still
+    /// connecting is left alone too, because disconnect() forwards to a writer that may not be
+    /// running yet; <see cref="OnOpen" /> closes it instead.
+    ///
+    /// It is never asked to wait. The close it would wait for is delivered on this same thread, so
+    /// waiting could only ever hold the main thread for the SDK's full second.
     /// </summary>
     public override void Disconnect(bool waitForComplete)
     {
-        if (_connection is not null)
+        if (_connection is { IsConnecting: false })
         {
-            base.Disconnect(waitForComplete);
+            base.Disconnect(false);
+        }
+    }
+
+    /// <summary>
+    /// What ends the reconnector, from WebRTCClient.release() or a stopping session. An open socket
+    /// is untouched, so an answer on its way still arrives.
+    /// </summary>
+    public override void StopReconnector()
+    {
+        _reconnectorStopped = true;
+        base.StopReconnector();
+    }
+
+    /// <summary>
+    /// A connect can't be called off, and on its own thread it can finish after the session has
+    /// ended. The client has dropped this handler by then, so nothing else would close the socket.
+    /// </summary>
+    public override void OnOpen()
+    {
+        if (_reconnectorStopped)
+        {
+            base.Disconnect(false);
+        }
+        else
+        {
+            base.OnOpen();
         }
     }
 
@@ -112,7 +145,32 @@ internal class BackgroundWebSocketConnection : WebSocketConnection
 
     private volatile bool _connecting;
 
+    private bool _writerCreated;
+
     public bool IsConnecting => _connecting;
+
+    /// <summary>
+    /// Brings the writer up first, where autobahn starts the reader first. A server hanging up at
+    /// once has the reader report it to the main thread, and failConnection() there forwards to
+    /// the writer. Once that object exists but its thread hasn't made a Handler yet, that is a
+    /// NullPointerException on the main thread, which ends the process. It couldn't happen while
+    /// connect() held the main thread, because the report had to wait for connect() to return.
+    /// </summary>
+    protected override void CreateReader()
+    {
+        CreateWriter();
+        base.CreateReader();
+    }
+
+    /// <summary>The second call is autobahn's own, once the reader is up.</summary>
+    protected override void CreateWriter()
+    {
+        if (!_writerCreated)
+        {
+            _writerCreated = true;
+            base.CreateWriter();
+        }
+    }
 
     public override void Connect(URI? webSocketURI, Observer? connectionObserver)
     {

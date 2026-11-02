@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Android.App;
 using Org.Webrtc;
 
@@ -99,6 +100,7 @@ public static class RemoteTrackTests
         ("an ended remote track gives the renderer back", ReleasesRendererAsync),
         ("a track that replaces another in one offer gets the renderer", ReplacementGetsRendererAsync),
         ("a track that arrives after Stop() is ignored", IgnoresTrackAfterStopAsync),
+        ("a track that arrives while Stop() waits for the server is ignored", IgnoresTrackWhileFinishingAsync),
     ];
 
     /// <summary>
@@ -110,7 +112,7 @@ public static class RemoteTrackTests
     {
         const string streamId = "faketrack";
 
-        using var server = new FakeSignallingServer { StreamId = streamId, Offer = Offer };
+        using var server = new FakeSignallingServer { Offer = Offer };
         var renderer = new SurfaceViewRenderer(activity);
         using var client = new AntMediaClient(Options(server.Url), activity);
         client.SetRemoteRenderer(renderer);
@@ -141,7 +143,6 @@ public static class RemoteTrackTests
 
         using var server = new FakeSignallingServer
         {
-            StreamId = streamId,
             Offer = Offer,
             Renegotiation = StoppedSending,
         };
@@ -182,7 +183,6 @@ public static class RemoteTrackTests
 
         using var server = new FakeSignallingServer
         {
-            StreamId = streamId,
             Offer = Offer,
             Renegotiation = Replaced,
         };
@@ -214,7 +214,6 @@ public static class RemoteTrackTests
 
         using var server = new FakeSignallingServer
         {
-            StreamId = streamId,
             Offer = Offer,
             OfferAfter = stopped.Task,
         };
@@ -256,6 +255,62 @@ public static class RemoteTrackTests
         return answered
             ? "the client set the offer after Stop() and left the renderer alone"
             : "the client hung up before the offer arrived";
+    }
+
+    /// <summary>
+    /// Stopping a play the server has confirmed leaves the socket open until the server says the
+    /// play has finished, so a renegotiation can still arrive. The track it adds must neither raise
+    /// TrackAdded nor take the renderer, and the one it removes must not raise TrackRemoved.
+    /// </summary>
+    private static async Task<string> IgnoresTrackWhileFinishingAsync(Activity activity)
+    {
+        const string streamId = "faketrackfinishing";
+
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var server = new FakeSignallingServer
+        {
+            Offer = Offer,
+            Renegotiation = Replaced,
+            RenegotiationAfter = stopped.Task,
+
+            // So that the client is still waiting when the renegotiation arrives.
+            AnswersStop = false,
+        };
+
+        var renderer = new SurfaceViewRenderer(activity);
+        using var client = new AntMediaClient(Options(server.Url), activity);
+        client.SetRemoteRenderer(renderer);
+
+        var added = Watch(handler => client.TrackAdded += handler);
+
+        await client.PlayAsync(streamId).WaitAsync(Limit);
+        await Expect(added, "TrackAdded");
+
+        // Raised on the SDK's signalling thread.
+        var late = new ConcurrentQueue<string>();
+        client.TrackAdded += (_, e) => late.Enqueue($"TrackAdded for '{e.TrackId}'");
+        client.TrackRemoved += (_, e) => late.Enqueue($"TrackRemoved for '{e.TrackId}'");
+
+        client.Stop();
+        stopped.SetResult();
+
+        if (!await server.Answered.WaitAsync(Limit))
+        {
+            throw new InvalidOperationException("the client hung up before the renegotiation arrived.");
+        }
+
+        if (!late.IsEmpty)
+        {
+            throw new InvalidOperationException($"{string.Join(" and ", late)} fired after Stop().");
+        }
+
+        if (HeldTrack(renderer) == ReplacementId)
+        {
+            throw new InvalidOperationException($"the renderer took '{ReplacementId}' after Stop().");
+        }
+
+        return "the client set a renegotiation after Stop() and left the renderer alone";
     }
 
     /// <summary>
