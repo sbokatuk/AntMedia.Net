@@ -197,15 +197,19 @@ through a post to the main thread, and the next session must not initialise them
 `init()` would throw `Already initialized`, or the new preview would go dark when the release
 arrived.
 
-That is one reason a session opens its socket with `connectWebSocket()` and leaves `init()` to
-`publish()`, `play()` or `join()`, which run only once the socket is open, after any such post. The
-other is that `init()` isn't safe to run twice in quick succession, which calling `Init()` before
-`publish()` did. It checks for a peer connection factory, then has a single-thread executor shared
-by every client build one, so a second call can arrive while the first factory is still being
-built. Either the SDK throws `PeerConnectionFactory has already been constructed` inside a callback,
-which ends the process, or it quietly builds a second factory, and the tracks and the peer connection
-come from different factories. Releasing a session queues its teardown on that executor ahead of the
-next factory, which made both common: the loopback checks hit the throw in 2 of 11 runs, and built
+So a new session first runs whatever is left of the last one, including an end queued from a
+pool thread, as a cancelled or failed start's is. It also opens its socket with
+`connectWebSocket()` and leaves `init()` to `publish()`, `play()` or `join()`, which run only once
+the socket is open, after any such post.
+
+There is a second reason for that. `init()` isn't safe to run twice in quick succession, which
+calling `Init()` before `publish()` did. It checks for a peer connection factory, then has a
+single-thread executor shared by every client build one, so a second call can arrive while the first
+factory is still being built. Either the SDK throws `PeerConnectionFactory has already been
+constructed` inside a callback, which ends the process, or it quietly builds a second factory, and
+the tracks and the peer connection come from different factories. Releasing a session queues its
+teardown on that executor ahead of the next factory, which makes both likelier. With releases in
+place and `Init()` still called first, the loopback checks hit the throw in 2 of 11 runs, and built
 a second factory in each of the 6 runs where the builds were counted. Opening the socket this way,
 the same checks build exactly one factory per session that reaches the server, every time.
 

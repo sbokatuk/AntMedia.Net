@@ -318,10 +318,10 @@ public static class WebSocketConnectTests
         server.ConfirmsPublish = true;
         var retry = client.PublishAsync(streamId);
 
-        // Both sockets open: the old one is only closed by the end still queued.
+        // Until the retry's connection arrives, however the old one has ended.
         var held = DateTime.UtcNow + Limit;
 
-        while (server.Open < 2 && DateTime.UtcNow < held)
+        while (server.Connections < 2 && DateTime.UtcNow < held)
         {
             Thread.Sleep(1);
         }
