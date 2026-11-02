@@ -181,6 +181,20 @@ Capture permissions are the app's own responsibility either way: `CAMERA` and `R
 sandboxed Mac Catalyst app. That app also needs `com.apple.security.network.client` and
 `.server`: without the second one the server confirms the publish, but no media ever arrives.
 
+## Troubleshooting
+
+**An Android app freezes while connecting, with the main thread in `Object.wait`.** The stack goes
+through `de.tavendo.autobahn.WebSocketConnection`, in `connect()`, `createReader()` or
+`createWriter()`, and the app may show an ANR. It's a race in the websocket library inside Ant
+Media's Android SDK, and that library also holds the main thread for as long as the connection
+takes. `AntMediaClient` avoids both by connecting on a background thread, so this only affects code
+that calls `WebRTCClient` from `AntMedia.Net.Android` directly. This package can't fix it there,
+so use `AntMediaClient` if you can.
+
+On Android, `AntMediaClient` gives the websocket 10 seconds to connect, within
+`AntMediaOptions.Timeout`. A connection that takes longer fails with
+`AntMediaErrorCode.Disconnected`.
+
 ## Packages
 
 | Package | What it is | Target frameworks |

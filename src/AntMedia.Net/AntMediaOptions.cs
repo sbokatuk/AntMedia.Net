@@ -71,7 +71,9 @@ public sealed class AntMediaOptions
     /// <see cref="IAntMediaClient.PlayAsync" /> wait for the server to confirm before giving up.
     /// The SDKs report failures through callbacks and some conditions — an unreachable host, for
     /// example — produce no callback at all, so without a timeout those calls could wait forever.
-    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan" /> disables it.
+    /// <see cref="System.Threading.Timeout.InfiniteTimeSpan" /> disables it. On Android the
+    /// websocket has its own 10-second limit within this: a connection that takes longer fails
+    /// with <see cref="AntMediaErrorCode.Disconnected" />.
     /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
 

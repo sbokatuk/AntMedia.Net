@@ -46,6 +46,12 @@
 
   <ItemGroup>
     <Compile Include="../Shared/ServerMediaCheck.cs" Link="ServerMediaCheck.cs" />
+
+    <!--
+      Compiled in rather than reached through InternalsVisibleTo, so the shipped assembly carries
+      nothing for the sake of this test. WebSocketConnectTests subclasses it to inject a stall.
+    -->
+    <Compile Include="../../src/AntMedia.Net/Platforms/Android/BackgroundWebSocket.cs" Link="BackgroundWebSocket.cs" />
   </ItemGroup>
 
   <ItemGroup>

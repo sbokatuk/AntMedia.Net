@@ -99,6 +99,79 @@ mutable, and a re-pointed tag would otherwise silently build — and execute the
 of — different sources. An explicitly different tag skips the assertion, since the pin says
 nothing about it.
 
+#### The websocket connect runs off the main thread
+
+`WebSocketConnection.connect()`, in the `autobanh.jar` the SDK has carried unchanged since 2018,
+starts a thread and then calls a bare `wait()` on it, with no condition to re-check, while the new
+thread calls `notifyAll()` once as it comes up. If the new thread gets there first the wake-up is
+lost and the caller waits for ever. `WebRTCClient` makes this call on the main thread, so the app
+freezes. There are four such waits, and the source lines below are the ones a debugger shows:
+
+| Wait | Waiting for | In a frozen app, the main thread is at |
+|---|---|---|
+| `connect()`, line 204 | the socket thread | `connect:204` |
+| `connect()`, line 218 | the TCP connect | `connect:218` |
+| `createReader()`, line 336 | the reader thread | `createReader:336` |
+| `createWriter()`, line 317 | the writer thread | `createWriter:317` |
+
+The second one is also a freeze with no race involved: the main thread waits for as long as the
+connection takes, which was 2 minutes 14 seconds for an unreachable host on an emulator.
+
+The binding can't change the jar, and it can't run `Init()` elsewhere either.
+`WebSocketHandler.connect()` throws unless it's on the thread that built the `WebRTCClient`, and
+building the client on a worker moves every callback there, while `SurfaceViewRenderer` and
+`AppRTCAudioManager` insist on the main thread. So
+[`BackgroundWebSocket.cs`](../src/AntMedia.Net/Platforms/Android/BackgroundWebSocket.cs) leaves the
+SDK's calls where they are and moves only the body of autobahn's `connect()`, which has no thread
+rule of its own. A watchdog interrupts the thread if it stalls. All four waits catch
+`InterruptedException` and carry on, so after a lost wake-up the connect simply continues:
+
+- Once the socket is open, only the reader and writer waits remain, and those get 2 seconds.
+- Before that, a lost wake-up looks exactly like a slow TCP connect, so both get
+  `WEBSOCKET_CONNECTION_TIMEOUT`, the SDK's own 10 seconds. A lost wake-up recovers at that point,
+  and a connection still going fails with `Disconnected`.
+
+Ant Media tried the same idea in [#116][android-sdk-116] and reverted it in
+[#117][android-sdk-117], without saying why. `WebSocketHandler` still has that code, commented out.
+Their version needed three things this one handles: the connect's error path calls `disconnect()`,
+which throws off the client's thread; a failed connect reports `onClose` on the wrong thread; and
+the reconnector starts another attempt every 5 seconds while one is running.
+
+Code that calls `WebRTCClient` directly doesn't go through any of this and can still freeze.
+
+To force the real race, stop one thread between `start()` and the `synchronized` block while the
+started thread runs. It needs a Debug build, because the breakpoint uses the line table. With more
+than one device attached, also pass `-p:AdbTarget="-s <serial>"` to the install: the Debug install
+doesn't honour `ANDROID_SERIAL` and goes to the first device.
+
+```bash
+adb shell am start -D -n com.sbokatuk.antmedia.devicetests/.MainActivity
+```
+
+```bash
+adb forward tcp:8700 jdwp:$(adb shell pidof com.sbokatuk.antmedia.devicetests)
+```
+
+```bash
+jdb -attach localhost:8700
+```
+
+```text
+ignore uncaught java.lang.Throwable
+stop thread at de.tavendo.autobahn.WebSocketConnection:315
+```
+
+Wait a second at each breakpoint, then type `resume`. `stop thread` matters, because `jdb` otherwise
+suspends every thread, including the one that has to win. It also means `cont` does nothing, because
+`jdb` then has no current thread, and `ignore` stops it halting on unrelated class-loading
+exceptions.
+
+Use line 202, 216 or 334 for the other three waits. On a thread without the workaround, it never
+leaves `wait()`. The device tests can't do this, so `WebSocketConnectTests` adds a stall of its own
+straight after the real `createReader()` and `createWriter()`. That app also compiles in
+`BackgroundWebSocketConnection`, so the first breakpoints are on `AntMediaConnector` and recover. The
+main-thread hit only exists on a package without the workaround.
+
 ### iOS
 
 `native/ios/fetch-ios.sh` clones [WebRTC-iOS-SDK][ios-sdk] at the pinned commit, compiles our
@@ -257,6 +330,10 @@ run a server beside them; beyond that an iOS simulator has no camera to publish 
 Catalyst runner has no camera and nobody to answer the permission prompt. Both Apple runners honour
 `ANTMEDIA_TEST_SERVER` and run the live check when it is set, so the coverage is available locally
 — see below.
+
+The Android app also runs `WebSocketConnectTests` on every run, against a signalling server of its
+own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. That server only
+answers the websocket upgrade and confirms the publish, so these checks say nothing about media.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:
@@ -510,6 +587,8 @@ own fourth digit via the tag (`v2.17.2.4`). Cutting a release is: write
 `docs/release-notes/<version>.md`, tag, push the tag.
 
 [android-sdk]: https://github.com/ant-media/WebRTC-Android-SDK
+[android-sdk-116]: https://github.com/ant-media/WebRTC-Android-SDK/pull/116
+[android-sdk-117]: https://github.com/ant-media/WebRTC-Android-SDK/pull/117
 [ios-sdk]: https://github.com/ant-media/WebRTC-iOS-SDK
 [trusted-publishing]: https://learn.microsoft.com/nuget/nuget-org/trusted-publishing
 [stasel]: https://github.com/stasel/WebRTC

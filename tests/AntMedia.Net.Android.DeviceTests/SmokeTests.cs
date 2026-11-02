@@ -8,10 +8,11 @@ namespace AntMedia.Net.Android.DeviceTests;
 /// Offline checks that the packaged binding actually works on a device.
 ///
 /// They deliberately stop short of connecting to a server: a real publish/play round-trip needs a
-/// running Ant Media Server, which CI does not have. What is proven here is everything that can
-/// break between "the package restored" and "the SDK is usable" — that the native libraries load,
-/// that the bound types resolve at runtime, and that calls into them dispatch correctly. Those
-/// are the failures a desktop package test cannot see.
+/// running Ant Media Server, which CI does not have, and <see cref="WebSocketConnectTests" /> covers
+/// the signalling with a loopback stand-in. What is proven here is everything that can break
+/// between "the package restored" and "the SDK is usable" — that the native libraries load, that
+/// the bound types resolve at runtime, and that calls into them dispatch correctly. Those are the
+/// failures a desktop package test cannot see.
 /// </summary>
 public static class SmokeTests
 {
