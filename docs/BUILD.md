@@ -192,10 +192,23 @@ binds a track to a remote renderer:
 remote track sends, as in a multitrack play. A stream that simply ends arrives as `play_finished`
 instead, and the renderer is freed by `release()` when the session stops.
 
-Callbacks from a superseded session skip base as well as the event. The renderers carry over from
-one session to the next, and Ant Media gives every session the same track ids
-(`ARDAMSvvideoTrack0`), so a late callback would take or release the renderer the current session
-is using.
+Three more things keep the renderer right:
+
+- **Only the current client touches it.** A track callback from a client that has been replaced,
+  stopped or disposed skips base as well as the event. The renderers carry over from one session to
+  the next, and Ant Media gives every session the same track ids (`ARDAMSvvideoTrack0`), so a late
+  callback would take or release the renderer the current session is using. A play's offer can
+  still arrive after `Stop()`, so this matters even without a next session.
+- **The check and base run under a lock that `StopCore()` takes to let the client go.** The SDK does
+  its renderer work in posts to the main thread, so a callback's work is either queued before the
+  client goes, and runs before anything the next session queues, or not queued at all.
+  `DisposeCore()` posts the remote renderer's release for the same reason: released straight away,
+  an attach already queued would initialise it again.
+- **A track that finds the renderer taken waits for it.** In one renegotiation libwebrtc reports the
+  tracks it adds before the ones it removes. So a track that replaces another in the same offer
+  arrives while the old one still holds the renderer, and then the old one's release leaves the
+  renderer empty. The listener keeps the latest such track and attaches it from a post queued
+  behind the release.
 
 ### iOS
 
@@ -361,10 +374,12 @@ own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. 
 answers the websocket upgrade and confirms the publish, so these checks say nothing about media.
 
 `RemoteTrackTests` uses the same server to play, which the community server can't do. It sends the
-video section of an offer that the Enterprise edition sent this SDK, and then a renegotiation that
-stops the track. The SDK sets both offers on a real peer connection, so `TrackAdded`,
-`TrackRemoved` and the renderer handling run as they do against a real server. With no ICE no
-frame arrives, so these checks show which track the renderer holds, not that anything is drawn.
+video section of an offer that the Enterprise edition sent this SDK. Depending on the check, it
+follows that with a renegotiation that stops the track or replaces it, or it holds the offer back
+until after `Stop()`. A renegotiation goes out only once the client's answer frame has arrived. The
+SDK sets every offer on a real peer connection, so `TrackAdded`, `TrackRemoved` and the renderer
+handling run as they do against a real server. With no ICE no frame arrives, so these checks show
+which track the renderer holds, not that anything is drawn.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:

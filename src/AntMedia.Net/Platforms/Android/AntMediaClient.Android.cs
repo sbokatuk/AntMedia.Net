@@ -19,6 +19,17 @@ public sealed partial class AntMediaClient
     private NativeClient? _client;
 
     /// <summary>
+    /// Held by a track callback while it checks that its client is still <see cref="_client" />
+    /// and lets the SDK at the renderers, and by <see cref="StopCore" /> to let the client go. The
+    /// SDK does its renderer work in posts to the main thread, so a callback's work is either
+    /// queued before the client goes, ahead of anything the next session or
+    /// <see cref="DisposeCore" /> queues, or not queued at all.
+    /// </summary>
+    private readonly object _rendererLock = new();
+
+    private static readonly Handler MainThread = new(Looper.MainLooper!);
+
+    /// <summary>
     /// Incremented by <see cref="Build" />. The bridges carry the value they were created with,
     /// so a callback from a native client that has since been replaced — a publish that timed
     /// out and was retried, say — is recognised as stale and dropped instead of completing the
@@ -163,6 +174,7 @@ public sealed partial class AntMediaClient
         StopCore();
 
         var session = ++_session;
+        var listener = new ListenerBridge(this, session);
 
         var builder = new WebRTCClientBuilder()
             .SetActivity(_activity())
@@ -179,7 +191,7 @@ public sealed partial class AntMediaClient
                 ? IWebRTCClient.StreamSource.FrontCamera
                 : IWebRTCClient.StreamSource.RearCamera)
             .SetReconnectionEnabled(_options.ReconnectionEnabled)
-            .SetWebRTCListener(new ListenerBridge(this, session));
+            .SetWebRTCListener(listener);
 
         if (_options.DataChannelEnabled)
         {
@@ -207,39 +219,58 @@ public sealed partial class AntMediaClient
         if (kind is SessionKind.Play or SessionKind.Join && _remoteRenderer is not null)
         {
             builder = builder.AddRemoteVideoRenderer(_remoteRenderer);
+            listener.RemoteRenderer = _remoteRenderer;
         }
 
-        _client = builder.Build();
-        return _client;
+        var client = builder.Build();
+        listener.Client = client;
+
+        lock (_rendererLock)
+        {
+            _client = client;
+        }
+
+        return client;
     }
 
     private void StopCore()
     {
-        if (_client is null)
+        if (_client is not { } client)
         {
             return;
         }
 
+        // Let go of first, so that a track arriving during or after the stop leaves the renderers
+        // alone and raises nothing.
+        lock (_rendererLock)
+        {
+            _client = null;
+        }
+
         try
         {
-            _client.Stop(StreamId ?? string.Empty);
+            client.Stop(StreamId ?? string.Empty);
         }
         catch (Exception)
         {
             // Stopping a session that never fully started throws from the native layer. There is
             // nothing a caller could do about it, and it would mask the real failure.
         }
-
-        _client = null;
     }
 
     private void DisposeCore()
     {
         // The renderers hold an EGL context that managed collection alone does not reclaim.
         _localRenderer?.Release();
-        _remoteRenderer?.Release();
         _localRenderer = null;
-        _remoteRenderer = null;
+
+        // Posted, so that it runs after any attach the SDK queued for a track that arrived just
+        // before the stop. Released first, the renderer would be initialised again after it.
+        if (_remoteRenderer is { } remote)
+        {
+            _remoteRenderer = null;
+            MainThread.Post(remote.Release);
+        }
     }
 
     /// <inheritdoc />
@@ -261,7 +292,8 @@ public sealed partial class AntMediaClient
     /// Translates the SDK's 40-callback listener into this client's events. Derives from
     /// DefaultWebRTCListener so the callbacks not handled here keep their default behaviour
     /// rather than having to be stubbed out. Callbacks from a superseded session — the native
-    /// client is rebuilt for every operation — are dropped by the session check.
+    /// client is rebuilt for every operation — are dropped by the session check. The track
+    /// callbacks go further and stop once the client is stopped, because they touch the renderers.
     /// </summary>
     private sealed class ListenerBridge(AntMediaClient owner, int session) : DefaultWebRTCListener
     {
@@ -361,35 +393,109 @@ public sealed partial class AntMediaClient
             }
         }
 
+        /// <summary>The native client this listener was built into, set once it exists.</summary>
+        public NativeClient? Client { get; set; }
+
+        /// <summary>The remote renderer handed to the SDK along with it, if any.</summary>
+        public SurfaceViewRenderer? RemoteRenderer { get; set; }
+
+        /// <summary>
+        /// The latest track that arrived to find the renderer taken. libwebrtc reports the tracks a
+        /// renegotiation adds before the ones it removes, so a track that replaces another in one
+        /// offer always finds the renderer still held by the one it replaces. Under the lock.
+        /// </summary>
+        private (VideoTrack Track, string? Id)? _waiting;
+
+        /// <summary>
+        /// The renderers are shared by every session, so only the client the owner still holds may
+        /// touch them: not one that has been replaced, stopped or disposed. Read under the lock.
+        /// </summary>
+        private bool OwnsRenderers => Client is not null && ReferenceEquals(owner._client, Client);
+
         // The two-argument overload, renamed in Metadata.xml, is the only one the SDK calls:
         // onAddTrack passes the track id as well. The one-argument overload just forwards here.
         //
-        // Base is what attaches the track to a free remote renderer, so it has to run, and on
-        // track end it releases that renderer so the next track can have it. Both are skipped for
-        // a superseded session along with the event: the renderers outlive it, and its tracks
-        // carry the same ids as the current session's, so its late callbacks would take or
-        // release the renderer the current session is using.
+        // Base attaches a new track to a free remote renderer, and releases the renderer when its
+        // track ends, so it has to run. Ant Media gives every session the same track ids, so a
+        // client the owner no longer holds would take or release the current session's renderer:
+        // its callbacks skip base along with the event.
         public override void OnNewVideoTrackWithId(VideoTrack? track, string? trackId)
         {
-            if (Stale || track is null)
+            if (track is null)
             {
                 return;
             }
 
-            base.OnNewVideoTrackWithId(track, trackId);
+            lock (owner._rendererLock)
+            {
+                if (!OwnsRenderers)
+                {
+                    return;
+                }
+
+                base.OnNewVideoTrackWithId(track, trackId);
+
+                if (RemoteRenderer is { } renderer && !Holds(renderer, track))
+                {
+                    _waiting = (track, trackId);
+                }
+            }
+
             owner.RaiseTrackAdded(track.Id() ?? string.Empty, track.Kind() ?? "video");
         }
 
         public override void OnVideoTrackEnded(VideoTrack? track)
         {
-            if (Stale || track is null)
+            if (track is null)
             {
                 return;
             }
 
-            base.OnVideoTrackEnded(track);
+            lock (owner._rendererLock)
+            {
+                if (!OwnsRenderers)
+                {
+                    return;
+                }
+
+                if (_waiting is { } waiting && waiting.Track.Id() == track.Id())
+                {
+                    _waiting = null;
+                }
+
+                base.OnVideoTrackEnded(track);
+
+                // Base queues the release on the main thread, so this goes in behind it.
+                if (_waiting is not null)
+                {
+                    MainThread.Post(AttachWaiting);
+                }
+            }
+
             owner.RaiseTrackRemoved(track.Id() ?? string.Empty, track.Kind() ?? "video");
         }
+
+        private void AttachWaiting()
+        {
+            lock (owner._rendererLock)
+            {
+                if (!OwnsRenderers || _waiting is not { } waiting)
+                {
+                    return;
+                }
+
+                base.OnNewVideoTrackWithId(waiting.Track, waiting.Id);
+
+                if (RemoteRenderer is not { } renderer || Holds(renderer, waiting.Track))
+                {
+                    _waiting = null;
+                }
+            }
+        }
+
+        /// <summary>The SDK marks a renderer as taken by setting its tag to the track.</summary>
+        private static bool Holds(SurfaceViewRenderer renderer, VideoTrack track) =>
+            renderer.Tag is VideoTrack held && held.Id() == track.Id();
     }
 
     /// <summary>

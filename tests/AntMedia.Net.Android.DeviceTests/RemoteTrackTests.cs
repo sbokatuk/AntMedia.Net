@@ -23,6 +23,9 @@ public static class RemoteTrackTests
     // The track id from the offer's msid line.
     private const string TrackId = "ARDAMSvvideoTrack0";
 
+    // The track that replaces it in Replaced.
+    private const string ReplacementId = "ARDAMSvvideoTrack1";
+
     /// <summary>
     /// The video section of an offer Ant Media Server Enterprise sent to this SDK for a play, with
     /// its audio and data channel sections left out.
@@ -84,10 +87,18 @@ public static class RemoteTrackTests
         .Replace(" 2 IN IP4 ", " 3 IN IP4 ")
         .Replace("a=sendonly", "a=inactive");
 
+    /// <summary>
+    /// One renegotiation that stops the track and adds another in a second section, with its own
+    /// mid, track id and SSRCs.
+    /// </summary>
+    private static readonly string Replaced = ReplaceTrack(Offer);
+
     public static IReadOnlyList<(string Name, Func<Activity, Task<string>> Run)> All =>
     [
         ("play reports the remote video track", ReportsTrackAsync),
         ("an ended remote track gives the renderer back", ReleasesRendererAsync),
+        ("a track that replaces another in one offer gets the renderer", ReplacementGetsRendererAsync),
+        ("a track that arrives after Stop() is ignored", IgnoresTrackAfterStopAsync),
     ];
 
     /// <summary>
@@ -154,23 +165,135 @@ public static class RemoteTrackTests
                 $"the renderer held {Describe(heldWhenAdded)} when the track arrived, so there was nothing to release.");
         }
 
-        // Released on the main thread, where this check runs, so it is waited for rather than
-        // expected straight away.
+        await WaitForRendererAsync(renderer, null, "TrackRemoved fired");
+
+        client.Stop();
+        return $"TrackRemoved {track.Kind} {track.TrackId}, renderer released";
+    }
+
+    /// <summary>
+    /// libwebrtc reports the track a renegotiation adds before the one it removes, so the new
+    /// track arrives to find the renderer still taken. Left to the SDK's default it gets no
+    /// renderer, and the old track's release then leaves the renderer empty.
+    /// </summary>
+    private static async Task<string> ReplacementGetsRendererAsync(Activity activity)
+    {
+        const string streamId = "faketrackswap";
+
+        using var server = new FakeSignallingServer
+        {
+            StreamId = streamId,
+            Offer = Offer,
+            Renegotiation = Replaced,
+        };
+
+        var renderer = new SurfaceViewRenderer(activity);
+        using var client = new AntMediaClient(Options(server.Url), activity);
+        client.SetRemoteRenderer(renderer);
+
+        var removed = Watch(handler => client.TrackRemoved += handler);
+
+        await client.PlayAsync(streamId).WaitAsync(Limit);
+        await Expect(removed, "TrackRemoved");
+        await WaitForRendererAsync(renderer, ReplacementId, $"'{TrackId}' was replaced");
+
+        client.Stop();
+        return $"'{ReplacementId}' took the renderer when '{TrackId}' let it go";
+    }
+
+    /// <summary>
+    /// The server's offer can already be on its way when Stop() is called. A track it brings must
+    /// neither raise TrackAdded nor take the renderer, which the app may be about to release or
+    /// hand to its next session.
+    /// </summary>
+    private static async Task<string> IgnoresTrackAfterStopAsync(Activity activity)
+    {
+        const string streamId = "faketracklate";
+
+        var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        using var server = new FakeSignallingServer
+        {
+            StreamId = streamId,
+            Offer = Offer,
+            OfferAfter = stopped.Task,
+        };
+
+        var renderer = new SurfaceViewRenderer(activity);
+        using var client = new AntMediaClient(Options(server.Url), activity);
+        client.SetRemoteRenderer(renderer);
+
+        var added = Watch(handler => client.TrackAdded += handler);
+        var play = client.PlayAsync(streamId);
+
+        await server.CommandReceived.WaitAsync(Limit);
+        client.Stop();
+        stopped.SetResult();
+
+        try
+        {
+            await play.WaitAsync(Limit);
+        }
+        catch (OperationCanceledException)
+        {
+            // What Stop() does to a play still starting.
+        }
+
+        // Every callback the offer can cause has run once the client answers it. A client that
+        // hangs up instead never sees it.
+        var answered = await server.Answered.WaitAsync(Limit);
+
+        if (added.IsCompleted)
+        {
+            throw new InvalidOperationException($"TrackAdded fired after Stop() for '{added.Result.TrackId}'.");
+        }
+
+        if (HeldTrack(renderer) is { } held)
+        {
+            throw new InvalidOperationException($"the renderer took '{held}' after Stop().");
+        }
+
+        return answered
+            ? "the client set the offer after Stop() and left the renderer alone"
+            : "the client hung up before the offer arrived";
+    }
+
+    /// <summary>
+    /// Waits for the renderer to hold <paramref name="expected" />, or nothing when that is null.
+    /// The SDK attaches and releases on the main thread, where these checks run.
+    /// </summary>
+    private static async Task WaitForRendererAsync(SurfaceViewRenderer renderer, string? expected, string after)
+    {
         var elapsed = Stopwatch.StartNew();
 
-        while (HeldTrack(renderer) is { } held)
+        while (HeldTrack(renderer) is var held && held != expected)
         {
             if (elapsed.Elapsed > Limit)
             {
                 throw new InvalidOperationException(
-                    $"TrackRemoved fired but the renderer still holds {Describe(held)} after {Limit.TotalSeconds:0}s.");
+                    $"{after}, but {Limit.TotalSeconds:0}s later the renderer holds {Describe(held)}, not {Describe(expected)}.");
             }
 
             await Task.Delay(100);
         }
+    }
 
-        client.Stop();
-        return $"TrackRemoved {track.Kind} {track.TrackId}, renderer released";
+    private static string ReplaceTrack(string offer)
+    {
+        var start = offer.IndexOf("m=video", StringComparison.Ordinal);
+        var section = offer[start..];
+
+        var replacement = section
+            .Replace("a=mid:0", "a=mid:1")
+            .Replace(TrackId, ReplacementId)
+            .Replace("3237231459", "3237231460")
+            .Replace("1286856751", "1286856752");
+
+        return offer[..start]
+            .Replace(" 2 IN IP4 ", " 3 IN IP4 ")
+            .Replace("a=group:BUNDLE 0", "a=group:BUNDLE 0 1")
+            + section.Replace("a=sendonly", "a=inactive")
+            + replacement;
     }
 
     private static Task<AntMediaTrackEventArgs> Watch(Action<EventHandler<AntMediaTrackEventArgs>> subscribe)

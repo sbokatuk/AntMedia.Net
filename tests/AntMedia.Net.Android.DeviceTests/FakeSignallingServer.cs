@@ -9,7 +9,7 @@ namespace AntMedia.Net.Android.DeviceTests;
 
 /// <summary>
 /// Just enough of an Ant Media Server on loopback to get through the websocket: it answers the
-/// upgrade, and confirms a publish as soon as the client sends anything. There is no media, so a
+/// upgrade, and confirms a publish as soon as the client asks for one. There is no media, so a
 /// pass here says the signalling path works and nothing about streaming; that is the live check's
 /// job, and this one runs on the offline CI job, which has no server.
 ///
@@ -20,8 +20,16 @@ internal sealed partial class FakeSignallingServer : IDisposable
 {
     // Fixed by RFC 6455.
     private const string WebSocketGuid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    private const int TextOpcode = 1;
+    private const int CloseOpcode = 8;
 
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
+
+    private readonly TaskCompletionSource _commandReceived =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private readonly TaskCompletionSource<bool> _answered =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public FakeSignallingServer()
     {
@@ -40,12 +48,23 @@ internal sealed partial class FakeSignallingServer : IDisposable
     /// </summary>
     public string? Offer { get; init; }
 
+    /// <summary>Holds the <see cref="Offer" /> back until this completes.</summary>
+    public Task? OfferAfter { get; init; }
+
     /// <summary>
-    /// A second offer, sent once the client has answered the first. A play sends nothing else in
-    /// between, and even an early ICE candidate means the answer has been set, so the client is
-    /// ready for it either way.
+    /// A second offer, sent once the client's answer to the first arrives. The client sends that
+    /// only after setting the first offer, so it is ready for another.
     /// </summary>
     public string? Renegotiation { get; init; }
+
+    /// <summary>Completes when the client's first command arrives.</summary>
+    public Task CommandReceived => _commandReceived.Task;
+
+    /// <summary>
+    /// True once the client answers the <see cref="Offer" />. It answers only after setting the
+    /// offer, so every track callback for it has run by then. False if the connection ends first.
+    /// </summary>
+    public Task<bool> Answered => _answered.Task;
 
     public void Dispose() => _listener.Stop();
 
@@ -86,21 +105,47 @@ internal sealed partial class FakeSignallingServer : IDisposable
                     $"Sec-WebSocket-Accept: {accept}\r\n\r\n")).ConfigureAwait(false);
 
                 // The first frame the client sends is the publish or play command.
-                if (await stream.ReadAsync(buffer).ConfigureAwait(false) > 0)
+                if (await ReadCommandAsync(stream).ConfigureAwait(false) is null)
                 {
-                    if (Offer is null)
-                    {
-                        await stream.WriteAsync(TextFrame(Notification("publish_started"))).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        await stream.WriteAsync(TextFrame(Configuration(Offer))).ConfigureAwait(false);
-                        await stream.WriteAsync(TextFrame(Notification("play_started"))).ConfigureAwait(false);
+                    return;
+                }
 
-                        if (Renegotiation is not null && await stream.ReadAsync(buffer).ConfigureAwait(false) > 0)
-                        {
-                            await stream.WriteAsync(TextFrame(Configuration(Renegotiation))).ConfigureAwait(false);
-                        }
+                _commandReceived.TrySetResult();
+
+                if (Offer is null)
+                {
+                    await stream.WriteAsync(TextFrame(Notification("publish_started"))).ConfigureAwait(false);
+                }
+                else
+                {
+                    if (OfferAfter is not null)
+                    {
+                        await OfferAfter.ConfigureAwait(false);
+                    }
+
+                    await stream.WriteAsync(TextFrame(Configuration(Offer))).ConfigureAwait(false);
+                    await stream.WriteAsync(TextFrame(Notification("play_started"))).ConfigureAwait(false);
+
+                    // Its answer is the client's only takeConfiguration. ICE candidates can come
+                    // either side of it.
+                    string? command;
+
+                    do
+                    {
+                        command = await ReadCommandAsync(stream).ConfigureAwait(false);
+                    }
+                    while (command is not null and not "takeConfiguration");
+
+                    if (command is null)
+                    {
+                        return;
+                    }
+
+                    _answered.TrySetResult(true);
+
+                    if (Renegotiation is not null)
+                    {
+                        await stream.WriteAsync(TextFrame(Configuration(Renegotiation))).ConfigureAwait(false);
                     }
                 }
 
@@ -112,7 +157,60 @@ internal sealed partial class FakeSignallingServer : IDisposable
             {
                 // The client went away, which is how every test here ends.
             }
+            finally
+            {
+                _answered.TrySetResult(false);
+            }
         }
+    }
+
+    /// <summary>The command in the client's next text frame, or null if it closes instead.</summary>
+    private static async Task<string?> ReadCommandAsync(NetworkStream stream)
+    {
+        while (true)
+        {
+            var (opcode, payload) = await ReadFrameAsync(stream).ConfigureAwait(false);
+
+            if (opcode == CloseOpcode)
+            {
+                return null;
+            }
+
+            if (opcode == TextOpcode)
+            {
+                using var json = JsonDocument.Parse(payload);
+                return json.RootElement.GetProperty("command").GetString() ?? string.Empty;
+            }
+        }
+    }
+
+    /// <summary>One client frame, unmasked. Autobahn doesn't fragment what the SDK sends.</summary>
+    private static async Task<(int Opcode, byte[] Payload)> ReadFrameAsync(NetworkStream stream)
+    {
+        var header = new byte[2];
+        await stream.ReadExactlyAsync(header).ConfigureAwait(false);
+
+        long length = header[1] & 0x7F;
+
+        if (length >= 126)
+        {
+            var extended = new byte[length == 126 ? 2 : 8];
+            await stream.ReadExactlyAsync(extended).ConfigureAwait(false);
+            length = extended.Aggregate(0L, (value, next) => (value << 8) | next);
+        }
+
+        var mask = new byte[4];
+        await stream.ReadExactlyAsync(mask).ConfigureAwait(false);
+
+        var payload = new byte[length];
+        await stream.ReadExactlyAsync(payload).ConfigureAwait(false);
+
+        for (var i = 0; i < payload.Length; i++)
+        {
+            payload[i] ^= mask[i % 4];
+        }
+
+        return (header[0] & 0x0F, payload);
     }
 
     private string Notification(string definition) =>
