@@ -1,5 +1,6 @@
 using Android.App;
 using Android.OS;
+using Android.Util;
 using AntMedia.WebRTC.Api;
 using Org.Webrtc;
 
@@ -12,17 +13,50 @@ namespace AntMedia.Net;
 /// </summary>
 public sealed partial class AntMediaClient
 {
+    private const string Tag = "AntMediaClient";
+
+    /// <summary>
+    /// How long a stopped session waits for the server to say it has finished. Ant Media answers
+    /// straight away; this is for a server that has hung, or a network that has gone.
+    /// </summary>
+    private static readonly TimeSpan FinishLimit = TimeSpan.FromSeconds(5);
+
     private readonly Func<Activity> _activity;
 
     private SurfaceViewRenderer? _localRenderer;
     private SurfaceViewRenderer? _remoteRenderer;
     private NativeClient? _client;
+    private BackgroundWebSocketHandler? _webSocket;
 
     /// <summary>
-    /// Incremented by <see cref="Build" />. The bridges carry the value they were created with,
-    /// so a callback from a native client that has since been replaced — a publish that timed
-    /// out and was retried, say — is recognised as stale and dropped instead of completing the
-    /// new operation.
+    /// The thread <see cref="_client" /> was built on. The SDK's websocket calls throw anywhere
+    /// else, and a failed start ends on a pool thread, where the stop used to be lost.
+    /// </summary>
+    private Handler? _clientThread;
+
+    /// <summary>
+    /// The stream <see cref="_client" /> was built for. Owned here rather than read from the
+    /// shared <see cref="StreamId" />, which already names the new stream when a restart stops
+    /// the old one.
+    /// </summary>
+    private string? _sessionStreamId;
+
+    /// <summary>
+    /// True from the server confirming the session until it says the session has finished, which
+    /// is when stopping it has an answer to wait for.
+    /// </summary>
+    private bool _confirmed;
+
+    /// <summary>
+    /// A client that has been stopped and is waiting for that answer. Touched only on its thread.
+    /// </summary>
+    private NativeClient? _finishing;
+
+    /// <summary>
+    /// Incremented by <see cref="Build" />, and by <see cref="StopCore" /> for a session nobody is
+    /// waiting to hear from. The bridges carry the value they were created with, so a callback
+    /// from a native client that has since been replaced — a publish that timed out and was
+    /// retried, say — is recognised as stale and dropped instead of completing the new operation.
     /// </summary>
     private int _session;
 
@@ -138,6 +172,7 @@ public sealed partial class AntMediaClient
     private void WhenConnected(SessionKind kind, string streamId, Action<NativeClient> start)
     {
         var client = Build(kind, streamId);
+        var thread = _clientThread!;
 
         _whenConnected = () =>
         {
@@ -147,22 +182,46 @@ public sealed partial class AntMediaClient
 
         // Installed before Init(), which otherwise builds the SDK's own handler and connects on
         // this thread. Init() only sets up reconnection on a handler it built itself.
-        var webSocket = new BackgroundWebSocketHandler(client, new Handler(Looper.MyLooper()!));
+        var webSocket = new BackgroundWebSocketHandler(client, thread);
         client.SetWsHandler(webSocket);
+        _webSocket = webSocket;
 
         if (_options.ReconnectionEnabled)
         {
             webSocket.SetupWsReconnection();
         }
 
-        client.Init();
+        // Queued rather than called. The renderers carry over from one session to the next, and
+        // release() hands them back through this same queue. Init() on a renderer still held by
+        // the last session throws "Already initialized", and that session's release arriving
+        // after Init() would darken the new one.
+        thread.Post(() =>
+        {
+            if (!ReferenceEquals(_client, client))
+            {
+                return;
+            }
+
+            try
+            {
+                client.Init();
+            }
+            catch (Exception exception)
+            {
+                _pending?.TrySetException(exception);
+            }
+        });
     }
 
     private NativeClient Build(SessionKind kind, string streamId)
     {
         StopCore();
 
-        var session = ++_session;
+        // A session being replaced isn't waited for: its callbacks are about to go stale, and it
+        // has to give up the renderers ahead of the next one.
+        ReleaseFinishing();
+
+        var session = Interlocked.Increment(ref _session);
 
         var builder = new WebRTCClientBuilder()
             .SetActivity(_activity())
@@ -209,20 +268,57 @@ public sealed partial class AntMediaClient
             builder = builder.AddRemoteVideoRenderer(_remoteRenderer);
         }
 
+        _sessionStreamId = streamId;
+        _confirmed = false;
+        _clientThread = new Handler(Looper.MyLooper()!);
         _client = builder.Build();
         return _client;
     }
 
+    /// <summary>
+    /// Ends the running session. WebRTCClient.stop() alone doesn't: it tells the server if the
+    /// socket is up and leaves everything else to release(), which the SDK only calls itself when
+    /// ICE disconnects after a stop. A start that failed never got that far, so it was left with
+    /// the camera, the factory and a reconnector calling connect() every five seconds for the life
+    /// of the process, and the first socket to open would publish for a caller long gone.
+    ///
+    /// A stream the server has confirmed can't be released straight away, because release() closes
+    /// the socket that publish_finished or play_finished comes back on. Those sessions wait for it,
+    /// within <see cref="FinishLimit" />; every other session has nothing to wait for.
+    /// </summary>
     private void StopCore()
     {
-        if (_client is null)
+        _whenConnected = null;
+
+        // Exchanged: Stop() and the failure it causes in RunAsync both get here.
+        if (Interlocked.Exchange(ref _client, null) is not { } client)
         {
             return;
         }
 
+        var webSocket = _webSocket!;
+        var thread = _clientThread!;
+        var streamId = _sessionStreamId ?? string.Empty;
+        var waitForServer = _confirmed && !_disposed;
+
+        if (!waitForServer)
+        {
+            Interlocked.Increment(ref _session);
+        }
+
+        RunOn(thread, () => EndSession(client, webSocket, thread, streamId, waitForServer));
+    }
+
+    private void EndSession(
+        NativeClient client,
+        BackgroundWebSocketHandler webSocket,
+        Handler thread,
+        string streamId,
+        bool waitForServer)
+    {
         try
         {
-            _client.Stop(StreamId ?? string.Empty);
+            client.Stop(streamId);
         }
         catch (Exception)
         {
@@ -230,11 +326,80 @@ public sealed partial class AntMediaClient
             // nothing a caller could do about it, and it would mask the real failure.
         }
 
-        _client = null;
+        // With the socket down, no answer can arrive and the server was not told to stop, so only
+        // closing the peer connection ends the stream.
+        if (!waitForServer || !client.IsWebSocketConnected)
+        {
+            Release(client);
+            return;
+        }
+
+        // Leaves the open socket alone, so the answer still arrives.
+        webSocket.StopReconnector();
+
+        _finishing = client;
+
+        thread.PostDelayed(
+            () =>
+            {
+                if (ReferenceEquals(_finishing, client))
+                {
+                    ReleaseFinishing();
+                }
+            },
+            (long)FinishLimit.TotalMilliseconds);
+    }
+
+    /// <summary>Called on the client's thread once the server has finished the session.</summary>
+    private void OnSessionFinished()
+    {
+        _confirmed = false;
+        ReleaseFinishing();
+    }
+
+    private void ReleaseFinishing()
+    {
+        if (_finishing is { } client)
+        {
+            _finishing = null;
+            Release(client);
+        }
+    }
+
+    /// <summary>Safe to repeat: release() returns at once if it has run, as it may have on ICE.</summary>
+    private static void Release(NativeClient client)
+    {
+        try
+        {
+            client.Release(true);
+        }
+        catch (Exception exception)
+        {
+            // Often on a posted callback, where an exception would take the process down.
+            Log.Error(Tag, $"releasing the native client failed: {exception}");
+        }
+    }
+
+    private static void RunOn(Handler thread, Action action)
+    {
+        if (Looper.MyLooper() == thread.Looper)
+        {
+            action();
+        }
+        else
+        {
+            thread.Post(action);
+        }
     }
 
     private void DisposeCore()
     {
+        // Disposing cuts short whatever Stop() was still waiting for, as Stop() warns it will.
+        if (_clientThread is { } thread)
+        {
+            RunOn(thread, ReleaseFinishing);
+        }
+
         // The renderers hold an EGL context that managed collection alone does not reclaim.
         _localRenderer?.Release();
         _remoteRenderer?.Release();
@@ -286,6 +451,7 @@ public sealed partial class AntMediaClient
                 return;
             }
 
+            owner._confirmed = true;
             owner.CompletePending();
             owner.RaisePublishStarted(streamId);
         }
@@ -295,6 +461,7 @@ public sealed partial class AntMediaClient
             if (!Stale)
             {
                 owner.RaisePublishFinished(streamId);
+                owner.OnSessionFinished();
             }
         }
 
@@ -305,6 +472,7 @@ public sealed partial class AntMediaClient
                 return;
             }
 
+            owner._confirmed = true;
             owner.CompletePending();
             owner.RaisePlayStarted(streamId);
         }
@@ -314,6 +482,7 @@ public sealed partial class AntMediaClient
             if (!Stale)
             {
                 owner.RaisePlayFinished(streamId);
+                owner.OnSessionFinished();
             }
         }
 
@@ -357,6 +526,7 @@ public sealed partial class AntMediaClient
             // other peer arrives.
             if (!Stale)
             {
+                owner._confirmed = true;
                 owner.CompletePending();
             }
         }

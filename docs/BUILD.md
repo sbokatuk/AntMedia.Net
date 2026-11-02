@@ -133,9 +133,14 @@ rule of its own. A watchdog interrupts the thread if it stalls. All four waits c
 
 Ant Media tried the same idea in [#116][android-sdk-116] and reverted it in
 [#117][android-sdk-117], without saying why. `WebSocketHandler` still has that code, commented out.
-Their version needed three things this one handles: the connect's error path calls `disconnect()`,
-which throws off the client's thread; a failed connect reports `onClose` on the wrong thread; and
-the reconnector starts another attempt every 5 seconds while one is running.
+Their version needed four things this one handles: the connect's error path calls `disconnect()`,
+which throws off the client's thread; a failed connect reports `onClose` on the wrong thread; the
+reconnector starts another attempt every 5 seconds while one is running; and the main thread can now
+handle a failure while the connect is still going. That last one ends the process if it's missed.
+Autobahn starts the reader first, so a server that hangs up straight away has `failConnection()`
+forwarding to a writer whose thread has no `Handler` yet, which is a `NullPointerException` on the
+main thread. It took one or two attempts on an emulator, so this class starts the writer first.
+`disconnect()` forwards to the writer in the same way, so the handler holds it back during a connect.
 
 Code that calls `WebRTCClient` directly doesn't go through any of this and can still freeze.
 
@@ -171,6 +176,25 @@ leaves `wait()`. The device tests can't do this, so `WebSocketConnectTests` adds
 straight after the real `createReader()` and `createWriter()`. That app also compiles in
 `BackgroundWebSocketConnection`, so the first breakpoints are on `AntMediaConnector` and recover. The
 main-thread hit only exists on a package without the workaround.
+
+#### How a session ends
+
+`WebRTCClient.stop()` only tells the server to stop, and only when the socket is up. The camera, the
+peer connection factory, the socket and the 5-second reconnector all go in `release()`, and the SDK
+calls that itself in one place: when ICE disconnects after a stop. A start that failed never gets
+there, so `AntMediaClient.StopCore()` has to end the session itself. Which way depends on whether
+the server still has something to say:
+
+| Session being stopped | What happens | Why |
+|---|---|---|
+| Never confirmed: a failed start, or `Stop()` during one | `stop()`, then `release(true)` | No `publish_finished` will come. Its callbacks are dropped too, so `Disconnected` stops firing on a client that has given up. |
+| Confirmed, socket up | `stop()`, `stopReconnector()`, then `release(true)` on `publish_finished` or `play_finished`, or after 5 seconds | `release(true)` closes the socket the answer arrives on, so `PublishFinished` would be lost. `stopReconnector()` alone leaves an open socket untouched. |
+| Confirmed, socket down | `stop()`, then `release(true)` | The server can't be told, so closing the peer connection is the only thing that ends the stream. |
+| Replaced by a new operation | As above, then `release(true)` at once | Its callbacks are about to go stale anyway. |
+
+The other thing `release()` touches is the renderers, which outlive a session. It releases them
+through a post to the main thread, so `Init()` is posted after it. If `Init()` ran first it would
+throw `Already initialized`, or the new session's preview would go dark when the release arrived.
 
 ### iOS
 
@@ -332,8 +356,10 @@ Catalyst runner has no camera and nobody to answer the permission prompt. Both A
 — see below.
 
 The Android app also runs `WebSocketConnectTests` on every run, against a signalling server of its
-own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. That server only
-answers the websocket upgrade and confirms the publish, so these checks say nothing about media.
+own on loopback, so `PublishAsync` is exercised offline and in the trimmed run. That server answers
+the websocket upgrade, a publish, a stop and a close, and can hang up or refuse on request, so these
+checks cover how a session ends and say nothing about media. With no ICE, the SDK's own `release()`
+never fires there, so a session those checks see end was ended by the binding.
 
 Two choices in the iOS runner exist for reasons that are not obvious, and reverting either will
 cost you an hour of CI time or a confusing failure:
